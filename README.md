@@ -1,8 +1,8 @@
 # Uber Eats Order Tracker
 
-![Uber Eats Banner](image.png)
-
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+
+![Uber Eats Banner](image.png)
 
 Custom Home Assistant integration to track live Uber Eats orders, including entities for order stage, status, driver name, ETA, restaurant, lat/long, cross street, and history.
 
