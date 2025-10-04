@@ -38,4 +38,4 @@ Custom HA integration for tracking Uber Eats orders, with entities for stage, st
 ## Testing
 - Place an order; entities update every 15s.
 
-Disclaimer: Unofficial, may violate Uber ToS.
+Disclaimer: Unofficial
