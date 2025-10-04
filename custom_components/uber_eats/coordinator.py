@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import logging
 from datetime import timedelta
+from datetime import datetime  # Added this import to fix the error
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -45,8 +46,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                         contacts = order.get("contacts", [])
                         active_overview = order.get("activeOrderOverview", {})
                         background_feed_cards = order.get("backgroundFeedCards", [])
-                        lat = background_feed_cards[0].get("mapEntity", [])[0].get("latitude", self.hass.config.latitude) if background_feed_cards else self.hass.config.latitude
-                        lon = background_feed_cards[0].get("mapEntity", [])[0].get("longitude", self.hass.config.longitude) if background_feed_cards else self.hass.config.longitude
+                        lat = background_feed_cards[0].get("mapEntity", [])[0].get("latitude", None) if background_feed_cards else None
+                        lon = background_feed_cards[0].get("mapEntity", [])[0].get("longitude", None) if background_feed_cards else None
                         driver_location_str = await self._get_cross_street(lat, lon, session) if lat and lon else "No Active Order"
                         map_url = self._get_map_url(lat, lon) if lat and lon else "No Map Available"
                         current_data.update({
@@ -56,8 +57,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             "driver_name": contacts[0].get("title", "Unknown") if contacts else "Unknown",
                             "driver_eta_str": feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown",
                             "driver_eta": self._parse_eta_timestamp(feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"),
-                            "driver_location_lat": lat,
-                            "driver_location_lon": lon,
+                            "driver_location_lat": lat if lat else "No Active Order",
+                            "driver_location_lon": lon if lon else "No Active Order",
                             "driver_location": driver_location_str,
                             "map_url": map_url,
                             "minutes_remaining": self._calculate_minutes(feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"),
