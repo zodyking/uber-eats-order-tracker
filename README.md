@@ -38,9 +38,9 @@ Or use this button:
 ## Getting UUID & SID
 1. Log into [www.ubereats.com](https://www.ubereats.com) in a web browser (e.g., Chrome).
 2. Open Developer Tools (F12 or right-click > Inspect).
-3. Go to the "Application" tab > "Storage" > "Cookies" > "https://www.ubereats.com".
+3. Go to the "Network" tab > "Search GetActiveOrdersV1".
 4. Find the "sid" cookie and copy its value (long string, e.g., starting with "QA.CAESEF...").
-5. Find the "jwt-session" or other cookie, decode the JWT (use jwt.io), and copy the "uuid" from the payload.
+5. Find the "_userUuid" cookie and copy its value (long string, e.g., starting with "QA.CAESEF...").
 
 ## Configuration
 - **SID and UUID**: From Uber Eats browser cookies (see above).
