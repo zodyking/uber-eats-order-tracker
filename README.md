@@ -4,7 +4,8 @@
 
 Custom Home Assistant integration to track live Uber Eats orders, including entities for order stage, status, driver name, ETA, restaurant name, lat/long, cross street, and history.
 
-![Uber Eats Logo](custom_components/uber_eats/uber_eats_logo.png)
+![Uber Eats Logo](<img width="1460" height="461" alt="image" src="https://github.com/user-attachments/assets/f6ce6dc2-8399-4cc2-b829-58d1f3bebb12" />
+)
 
 ## Features
 - Monitors active orders with real-time updates every 15 seconds.
