@@ -1,11 +1,10 @@
 # Uber Eats Order Tracker
 
+![Uber Eats Banner](image.png)
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 
-Custom Home Assistant integration to track live Uber Eats orders, including entities for order stage, status, driver name, ETA, restaurant name, lat/long, cross street, and history.
-
-![Uber Eats Logo](<img width="1460" height="461" alt="image" src="https://github.com/user-attachments/assets/f6ce6dc2-8399-4cc2-b829-58d1f3bebb12" />
-)
+Custom Home Assistant integration to track live Uber Eats orders, including entities for order stage, status, driver name, ETA, restaurant, lat/long, cross street, and history.
 
 ## Features
 - Monitors active orders with real-time updates every 15 seconds.
@@ -36,8 +35,15 @@ Or use this button:
 3. Restart HA.
 4. Add via UI.
 
+## Getting UUID & SID
+1. Log into [www.ubereats.com](https://www.ubereats.com) in a web browser (e.g., Chrome).
+2. Open Developer Tools (F12 or right-click > Inspect).
+3. Go to the "Application" tab > "Storage" > "Cookies" > "https://www.ubereats.com".
+4. Find the "sid" cookie and copy its value (long string, e.g., starting with "QA.CAESEF...").
+5. Find the "jwt-session" or other cookie, decode the JWT (use jwt.io), and copy the "uuid" from the payload.
+
 ## Configuration
-- **SID and UUID**: From Uber Eats browser cookies (Dev Tools > Application > Cookies).
+- **SID and UUID**: From Uber Eats browser cookies (see above).
 - **Account Name**: Unique name (e.g., "Personal").
 - **Time Zone**: Select from dropdown (used for API).
 
@@ -46,8 +52,8 @@ Or use this button:
 - sensor.<account>_uber_eats_order_stage
 - sensor.<account>_uber_eats_order_status
 - sensor.<account>_uber_eats_driver_name
-- sensor.<account>_uber_eats_driver_eta (attribute: minutes_remaining)
-- sensor.<account>_uber_eats_order_history (attribute: history)
+- sensor.<account>_uber_eats_driver_eta (with minutes_remaining attribute)
+- sensor.<account>_uber_eats_order_history (with history attribute)
 - sensor.<account>_uber_eats_restaurant_name
 - sensor.<account>_uber_eats_order_id
 - sensor.<account>_uber_eats_order_status_description
