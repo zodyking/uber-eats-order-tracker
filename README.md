@@ -40,7 +40,8 @@ Or use this button:
 2. Open Developer Tools (F12 or right-click > Inspect).
 3. Go to the "Network" tab > "Search GetActiveOrdersV1".
 4. Find the "sid" cookie and copy its value (long string, e.g., starting with "QA.CAESEF...").
-5. Find the "_userUuid" cookie and copy its value (long string, e.g., starting with "QA.CAESEF...").
+5. Find the "_userUuid" cookie and copy its value (long string).
+Both required fields are stored in the same place under GetActiveOrdersV1 in the cookies section!
 
 ## Configuration
 - **SID and UUID**: From Uber Eats browser cookies (see above).
