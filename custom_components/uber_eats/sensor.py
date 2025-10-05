@@ -57,14 +57,11 @@ class UberEatsDriverName(UberEatsEntity):
         return self.coordinator.data.get("driver_name", "No Driver Assigned")
 
 class UberEatsDriverETA(UberEatsEntity):
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_translation_key = "driver_eta"
     @property
     def native_value(self):
-        return self.coordinator.data.get("driver_eta", "No ETA Available")
-    @property
-    def extra_state_attributes(self):
-        return {"minutes_remaining": self.coordinator.data.get("minutes_remaining", "No ETA Available")}
+        eta = self.coordinator.data.get("driver_eta_str", "No ETA Available")
+        return eta if eta != "No ETA Available" else "No ETA Available"
 
 class UberEatsOrderHistory(UberEatsEntity):
     _attr_translation_key = "order_history"
@@ -118,4 +115,5 @@ class UberEatsDriverLocation(UberEatsEntity):
     _attr_translation_key = "driver_location"
     @property
     def native_value(self):
-        return self.coordinator.data.get("driver_location", "No Active Order")
+        location = self.coordinator.data.get("driver_location", "No Active Order")
+        return location.split(',')[0].strip() if location != "No Active Order" else "No Active Order"
