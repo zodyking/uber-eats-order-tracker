@@ -43,6 +43,9 @@ Or use this button:
 5. Find the "_userUuid" cookie and copy its value (long string).
 Both required fields are stored in the same place under GetActiveOrdersV1 in the cookies section!
 
+<img width="886" height="590" alt="image" src="https://github.com/user-attachments/assets/c37132cd-3b28-44f3-83a3-56ed85e290b7" />
+
+
 ## Configuration
 - **SID and UUID**: From Uber Eats browser cookies (see above).
 - **Account Name**: Unique name (e.g., "Personal").
