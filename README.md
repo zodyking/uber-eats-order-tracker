@@ -63,12 +63,15 @@ Both required fields are stored in the same place under GetActiveOrdersV1 in the
 - sensor.<account>_uber_eats_driver_longitude
 - sensor.<account>_uber_eats_driver_location (cross street)
 
-## Testing
-1. Place an Uber Eats order.
-2. Entities update automatically.
+## Automation
+Please use the official bluepint to easily setup tts messages/updates from uber. 100% hasle free!
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fzodyking%2FUber-Eats-Active-Order-Updates-TTS-Blueprint%2Fblob%2Fmain%2Fuber_eats_updates_tts.yaml)
+
+<img width="554" height="1096" alt="image" src="https://github.com/user-attachments/assets/ff15face-204e-4ad0-8291-33a5e08393ea" />
+
 
 ## Notes
-- Unofficial integration; may violate Uber ToS.
+- Unofficial integration; may violate Uber ToS. 
 - Driver location (lat/long/cross street) requires active delivery.
 - For issues, open a GitHub issue.
 
