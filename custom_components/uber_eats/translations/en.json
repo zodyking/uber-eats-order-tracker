@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Uber Eats",
+        "description": "Connect your Uber Eats account.",
+        "data": {
+          "sid": "SID",
+          "uuid": "UUID",
+          "account_name": "Account name",
+          "time_zone": "Time zone"
+        },
+        "data_description": {
+          "sid": "Session ID from ubereats.com cookies. Must be at least 30 characters and start with \"QA.\"",
+          "uuid": "User UUID from cookies/headers. Must be at least 20 characters and include a dash \"-\".",
+          "account_name": "Just a nickname for this account (e.g., Personal, Work).",
+          "time_zone": "Must match Home Assistant’s time zone. Other selections will be rejected."
+        }
+      }
+    },
+    "error": {
+      "entry_too_short": "Entry too short.",
+      "must_include_dash": "Must include a dash \"-\".",
+      "must_start_with_qa": "Must start with \"QA.\"",
+      "invalid_time_zone": "Select your Home Assistant time zone.",
+      "invalid_credentials": "Unable to validate credentials. Check SID/UUID and try again."
+    }
+  }
+}
