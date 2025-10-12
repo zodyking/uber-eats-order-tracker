@@ -1,8 +1,0 @@
-{
-  "name": "Uber Eats Order Tracking",
-  "content_in_root": false,
-  "filename": "custom_components/uber_eats",
-  "render_readme": true,
-  "domains": ["sensor", "binary_sensor"],
-  "iot_class": "cloud_polling"
-}
