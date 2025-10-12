@@ -1,9 +1,8 @@
 import asyncio
 import aiohttp
 import logging
-from datetime import timedelta
-from datetime import datetime  # Added this import to fix the error
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from datetime import datetime, timedelta  # ← ensure timedelta is imported
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import ENDPOINT, HEADERS_TEMPLATE
@@ -34,53 +33,83 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             payload = {"orderUuid": None, "timezone": self.time_zone, "showAppUpsellIllustration": True}
             try:
                 async with session.post(url, json=payload, headers=headers) as resp:
-                    _LOGGER.info(f"API response status: {resp.status}")
+                    _LOGGER.info("API response status: %s", resp.status)
                     if resp.status != 200:
                         return self._default_data()
+
                     data = await resp.json()
                     orders = data.get("data", {}).get("orders", [])
                     current_data = self._default_data()
+
                     if orders:
                         order = orders[0]
                         feed_cards = order.get("feedCards", [])
                         contacts = order.get("contacts", [])
                         active_overview = order.get("activeOrderOverview", {})
                         background_feed_cards = order.get("backgroundFeedCards", [])
-                        lat = background_feed_cards[0].get("mapEntity", [])[0].get("latitude", None) if background_feed_cards else None
-                        lon = background_feed_cards[0].get("mapEntity", [])[0].get("longitude", None) if background_feed_cards else None
-                        driver_location_str = await self._get_cross_street(lat, lon, session) if lat and lon else "No Active Order"
+
+                        lat = (
+                            background_feed_cards[0].get("mapEntity", [])[0].get("latitude")
+                            if background_feed_cards else None
+                        )
+                        lon = (
+                            background_feed_cards[0].get("mapEntity", [])[0].get("longitude")
+                            if background_feed_cards else None
+                        )
+
+                        # Reverse geocode remaining components (or use defaults)
+                        if lat and lon:
+                            loc = await self._reverse_geocode(lat, lon, session)
+                        else:
+                            loc = {}
+
                         map_url = self._get_map_url(lat, lon) if lat and lon else "No Map Available"
+                        driver_eta_title = feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"
+
                         current_data.update({
                             "active": True,
                             "order_stage": self._parse_stage(feed_cards),
                             "order_status": feed_cards[0].get("status", {}).get("timelineSummary", "Unknown") if feed_cards else "Unknown",
                             "driver_name": contacts[0].get("title", "Unknown") if contacts else "Unknown",
-                            "driver_eta_str": feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown",
-                            "driver_eta": self._parse_eta_timestamp(feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"),
+
+                            "driver_eta_str": driver_eta_title,
+                            "driver_eta": self._parse_eta_timestamp(driver_eta_title),
+
                             "driver_location_lat": lat if lat else "No Active Order",
                             "driver_location_lon": lon if lon else "No Active Order",
-                            "driver_location": driver_location_str,
+
+                            # Location pieces (trimmed)
+                            "driver_location_street":   loc.get("road", "No Driver Assigned"),
+                            "driver_location_suburb":   loc.get("suburb", "No Driver Assigned"),
+                            "driver_location_quarter":  loc.get("quarter", "No Driver Assigned"),
+                            "driver_location_county":   loc.get("county", "No Driver Assigned"),
+                            "driver_location_address":  loc.get("address", "No Driver Assigned"),
+
                             "map_url": map_url,
-                            "minutes_remaining": self._calculate_minutes(feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"),
+                            "minutes_remaining": self._calculate_minutes(driver_eta_title),
+
                             "restaurant_name": active_overview.get("title", "Unknown"),
                             "order_id": order.get("uuid", "Unknown"),
                             "order_status_description": feed_cards[0].get("status", {}).get("timelineSummary", "Unknown") if feed_cards else "Unknown",
                             "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
                         })
-                        current_order = {
+
+                        # optional history (kept as you had)
+                        self._order_history.append({
                             "timestamp": dt_util.now().isoformat(),
                             "restaurant_name": current_data["restaurant_name"],
                             "order_status": current_data["order_status"],
                             "driver_name": current_data["driver_name"],
                             "driver_eta": current_data["driver_eta_str"],
                             "order_stage": current_data["order_stage"],
-                        }
-                        self._order_history.append(current_order)
+                        })
                         if len(self._order_history) > 10:
                             self._order_history = self._order_history[-10:]
+
                     return current_data
+
             except Exception as err:
-                _LOGGER.error(f"Error fetching data: {err}")
+                _LOGGER.error("Error fetching data: %s", err)
                 return self._default_data()
 
     def _default_data(self):
@@ -91,9 +120,17 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "driver_name": "No Driver Assigned",
             "driver_eta_str": "No ETA Available",
             "driver_eta": None,
+
             "driver_location_lat": self.hass.config.latitude or 0.0,
             "driver_location_lon": self.hass.config.longitude or 0.0,
-            "driver_location": "No Active Order",
+
+            # Location pieces (trimmed)
+            "driver_location_street": "No Driver Assigned",
+            "driver_location_suburb": "No Driver Assigned",
+            "driver_location_quarter": "No Driver Assigned",
+            "driver_location_county": "No Driver Assigned",
+            "driver_location_address": "No Driver Assigned",
+
             "map_url": "No Map Available",
             "minutes_remaining": None,
             "restaurant_name": "No Restaurant",
@@ -105,9 +142,9 @@ class UberEatsCoordinator(DataUpdateCoordinator):
     def _get_locale_code(self, time_zone):
         if time_zone.startswith("America/"):
             return "us"
-        elif time_zone.startswith("Australia/"):
+        if time_zone.startswith("Australia/"):
             return "au"
-        return "us"  # Fallback
+        return "us"
 
     def _parse_stage(self, feed_cards):
         if not feed_cards:
@@ -117,7 +154,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         return stages.get(progress, "unknown")
 
     def _parse_eta_timestamp(self, eta_str):
-        if not eta_str or eta_str == "N/A" or eta_str == "Unknown":
+        if not eta_str or eta_str in ("N/A", "Unknown"):
             return None
         try:
             eta_time = datetime.strptime(eta_str, "%I:%M %p").time()
@@ -127,32 +164,54 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 eta_full += timedelta(days=1)
             return eta_full
         except ValueError:
-            _LOGGER.warning(f"Failed to parse ETA: {eta_str}")
+            _LOGGER.warning("Failed to parse ETA: %s", eta_str)
             return None
 
     def _calculate_minutes(self, eta_str):
+        """No 24h wrap; clamp negatives to 0."""
         eta_ts = self._parse_eta_timestamp(eta_str)
-        if eta_ts:
-            return int((eta_ts - dt_util.now()).total_seconds() / 60)
-        return None
+        if not eta_ts:
+            return None
+        delta_secs = (eta_ts - dt_util.now()).total_seconds()
+        if delta_secs <= 0:
+            return 0
+        return int(delta_secs // 60)
 
-    async def _get_cross_street(self, lat, lon, session):
-        nominatim_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=17&addressdetails=1"
+    async def _reverse_geocode(self, lat, lon, session):
+        """
+        Return dict with location components we keep:
+        road, suburb, quarter, county, address
+        """
+        url = (
+            "https://nominatim.openstreetmap.org/reverse"
+            f"?format=json&lat={lat}&lon={lon}&zoom=17&addressdetails=1&accept-language=en"
+        )
         headers = {"User-Agent": "UberEatsHAIntegration/1.0"}
         try:
-            async with session.get(nominatim_url, headers=headers) as resp:
+            async with session.get(url, headers=headers) as resp:
                 if resp.status != 200:
-                    return "No Location Available"
+                    return {}
                 data = await resp.json()
-                road = data.get("address", {}).get("road", "")
-                city = data.get("address", {}).get("city", "")
-                state = data.get("address", {}).get("state", "")
-                cross_street = data.get("address", {}).get("crossroad", "") or ""
-                formatted = f"{road} & {cross_street}, {city}, {state}" if cross_street else f"{road}, {city}, {state}"
-                return formatted.strip().rstrip(",") or "No Location Available"
-        except:
-            return "No Location Available"
+                addr = data.get("address", {}) or {}
+                return {
+                    "road":     addr.get("road") or addr.get("pedestrian") or addr.get("footway") or "No Driver Assigned",
+                    "suburb":   addr.get("suburb") or "No Driver Assigned",
+                    "quarter":  addr.get("quarter") or "No Driver Assigned",
+                    "county":   addr.get("county") or "No Driver Assigned",
+                    "address":  data.get("display_name") or "No Driver Assigned",
+                }
+        except Exception as e:
+            _LOGGER.debug("Reverse geocode failed: %s", e)
+            return {}
 
     def _get_map_url(self, lat, lon):
-        min_lon, min_lat, max_lon, max_lat = lon - 0.001, lat - 0.001, lon + 0.001, lat + 0.001
-        return f"https://www.openstreetmap.org/export/embed.html?bbox={min_lon}%2C{min_lat}%2C{max_lon}%2C{max_lat}&layer=mapnik&marker={lat}%2C{lon}"
+        if not lat or not lon:
+            return "No Map Available"
+        min_lon, min_lat = lon - 0.001, lat - 0.001
+        max_lon, max_lat = lon + 0.001, lat + 0.001
+        return (
+            "https://www.openstreetmap.org/export/embed.html"
+            f"?bbox={min_lon}%2C{min_lat}%2C{max_lon}%2C{max_lat}&layer=mapnik&marker={lat}%2C{lon}"
+        )
+
+__all__ = ["UberEatsCoordinator"]

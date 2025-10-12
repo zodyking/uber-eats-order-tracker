@@ -1,10 +1,19 @@
 from .const import DOMAIN, CONF_ACCOUNT_NAME
 from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.helpers.entity_registry import async_get as async_get_entity_reg
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
     account_name = config_entry.data[CONF_ACCOUNT_NAME]
-    async_add_entities([UberEatsActiveOrder(coordinator, account_name)])
+    entities = [UberEatsActiveOrder(coordinator, account_name)]
+    async_add_entities(entities)
+    # Apply label to the binary sensor
+    entity_reg = async_get_entity_reg(hass)
+    label_id = "uber_eats"
+    for entity in entities:
+        entity_id = entity.entity_id
+        if entity_id:
+            entity_reg.async_update_entity(entity_id, labels=[label_id])
 
 class UberEatsActiveOrder(BinarySensorEntity):
     _attr_translation_key = "active_order"
@@ -15,7 +24,7 @@ class UberEatsActiveOrder(BinarySensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.last_update_success  # Make available if poll succeeded, even no order
+        return self.coordinator.last_update_success
 
     async def async_update(self):
         await self.coordinator.async_request_refresh()
