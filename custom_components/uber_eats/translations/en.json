@@ -23,7 +23,8 @@
       "must_include_dash": "Must include a dash \"-\".",
       "must_start_with_qa": "Must start with \"QA.\"",
       "invalid_time_zone": "Select your Home Assistant time zone.",
-      "invalid_credentials": "Unable to validate credentials. Check SID/UUID and try again."
+      "invalid_credentials": "Unable to validate credentials. Check SID/UUID and try again.",
+      "unknown_error": "An unexpected error occurred. Check logs for details."
     }
   }
 }

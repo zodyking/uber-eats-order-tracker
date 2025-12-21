@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
 from .coordinator import UberEatsCoordinator
-from .const import DOMAIN, CONF_SID, CONF_UUID, CONF_ACCOUNT_NAME, CONF_TIME_ZONE
+from .const import DOMAIN, CONF_SID, CONF_UUID, CONF_ACCOUNT_NAME, CONF_TIME_ZONE, ENDPOINT, HEADERS_TEMPLATE
+
+_LOGGER = logging.getLogger(__name__)
 
 # --- SAME dropdown as your existing file ---
 TIME_ZONES = [
@@ -13,7 +17,7 @@ TIME_ZONES = [
     'Africa/Cairo', 'Africa/Casablanca', 'Africa/Johannesburg', 'Africa/Lagos',
     'Africa/Nairobi', 'Africa/Tripoli', 'Africa/Windhoek', 'America/Anchorage',
     'America/Asuncion', 'America/Bogota', 'America/Buenos_Aires', 'America/Caracas',
-    'America/Chicago', 'America/Denver', 'America/Detroit', 'America/Edmonton',
+    'America/Chicago', 'America/Costa_Rica', 'America/Denver', 'America/Detroit', 'America/Edmonton',
     'America/Guatemala', 'America/Halifax', 'America/Havana', 'America/Lima',
     'America/Los_Angeles', 'America/Mexico_City', 'America/Montevideo',
     'America/New_York', 'America/Noronha', 'America/Panama', 'America/Phoenix',
@@ -58,6 +62,34 @@ def _validate_uuid(uuid: str) -> str | None:
         return "must_include_dash"
     return None
 
+async def _validate_credentials(hass, sid: str, uuid: str, time_zone: str) -> bool:
+    """Validate credentials by making a test API call. Returns True if valid."""
+    def _get_locale_code(tz: str) -> str:
+        if tz.startswith("America/"):
+            return "us"
+        if tz.startswith("Australia/"):
+            return "au"
+        return "us"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            locale_code = _get_locale_code(time_zone)
+            url = f"{ENDPOINT}?localeCode={locale_code}"
+            headers = HEADERS_TEMPLATE.copy()
+            headers["Cookie"] = f"sid={sid}; _userUuid={uuid}"
+            payload = {"orderUuid": None, "timezone": time_zone, "showAppUpsellIllustration": True}
+            
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status == 200:
+                    # Try to parse the response to ensure it's valid JSON
+                    data = await resp.json()
+                    # If we get valid data (even if empty orders), credentials are valid
+                    return "data" in data
+                return False
+    except Exception as e:
+        _LOGGER.debug("Credential validation error: %s", e)
+        return False
+
 class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -89,26 +121,23 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # If fields pass, try a live refresh to validate creds
             if not errors:
-                coordinator = UberEatsCoordinator(
-                    self.hass,
-                    sid=sid,
-                    uuid=uuid,
-                    account_name=account_name,
-                    time_zone=ha_tz,  # always store HA TZ
-                )
-                await coordinator.async_config_entry_first_refresh()
-                if not coordinator.last_update_success:
-                    errors["base"] = "invalid_credentials"
-                else:
-                    return self.async_create_entry(
-                        title=account_name,
-                        data={
-                            CONF_SID: sid,
-                            CONF_UUID: uuid,
-                            CONF_ACCOUNT_NAME: account_name,
-                            CONF_TIME_ZONE: ha_tz,
-                        },
-                    )
+                try:
+                    is_valid = await _validate_credentials(self.hass, sid, uuid, ha_tz)
+                    if not is_valid:
+                        errors["base"] = "invalid_credentials"
+                    else:
+                        return self.async_create_entry(
+                            title=account_name,
+                            data={
+                                CONF_SID: sid,
+                                CONF_UUID: uuid,
+                                CONF_ACCOUNT_NAME: account_name,
+                                CONF_TIME_ZONE: ha_tz,
+                            },
+                        )
+                except Exception as e:
+                    _LOGGER.exception("Error during integration setup: %s", e)
+                    errors["base"] = "unknown_error"
 
         # Schema with the full dropdown; default = HA timezone
         schema = vol.Schema(

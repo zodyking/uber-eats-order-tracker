@@ -109,7 +109,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                     return current_data
 
             except Exception as err:
-                _LOGGER.error("Error fetching data: %s", err)
+                _LOGGER.error("Error fetching data: %s", err, exc_info=True)
                 return self._default_data()
 
     def _default_data(self):
