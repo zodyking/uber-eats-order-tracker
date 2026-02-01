@@ -6,7 +6,7 @@
   "dependencies": [],
   "codeowners": ["@zodyking"],
   "iot_class": "cloud_polling",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "config_flow": true,
   "integration_type": "service"
 }

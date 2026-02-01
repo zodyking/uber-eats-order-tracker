@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, Mapping
+
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 
-from .coordinator import UberEatsCoordinator
-from .const import DOMAIN, CONF_SID, CONF_UUID, CONF_ACCOUNT_NAME, CONF_TIME_ZONE, ENDPOINT, HEADERS_TEMPLATE
+from .const import (
+    DOMAIN,
+    CONF_COOKIE,
+    CONF_SID,
+    CONF_SESSION_ID,
+    CONF_ACCOUNT_NAME,
+    CONF_TIME_ZONE,
+    ENDPOINT,
+    HEADERS_TEMPLATE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-# --- SAME dropdown as your existing file ---
+# --- Time zone dropdown ---
 TIME_ZONES = [
     'Africa/Abidjan', 'Africa/Accra', 'Africa/Addis_Ababa', 'Africa/Algiers',
     'Africa/Cairo', 'Africa/Casablanca', 'Africa/Johannesburg', 'Africa/Lagos',
@@ -46,23 +56,63 @@ TIME_ZONES = [
     'UTC'
 ]
 
-def _validate_sid(sid: str) -> str | None:
-    """Return an error key if invalid, else None."""
-    if not isinstance(sid, str) or not sid or len(sid) < 30:
-        return "entry_too_short"
-    if not sid.startswith("QA."):
-        return "must_start_with_qa"
-    return None
 
-def _validate_uuid(uuid: str) -> str | None:
-    """Return an error key if invalid, else None."""
-    if not isinstance(uuid, str) or not uuid or len(uuid) < 20:
-        return "entry_too_short"
-    if "-" not in uuid:
-        return "must_include_dash"
-    return None
+def _parse_cookie_string(cookie_string: str) -> dict[str, str | None]:
+    """
+    Parse a full cookie string and extract sid and uev2.id.session.
+    
+    Returns dict with 'sid' and 'session_id' keys (None if not found).
+    """
+    result = {"sid": None, "session_id": None}
+    
+    if not cookie_string:
+        return result
+    
+    # Split by '; ' to get individual cookies
+    cookies = cookie_string.split("; ")
+    
+    for cookie in cookies:
+        if "=" in cookie:
+            key, _, value = cookie.partition("=")
+            key = key.strip()
+            value = value.strip()
+            
+            if key == "sid":
+                result["sid"] = value
+            elif key == "uev2.id.session":
+                result["session_id"] = value
+    
+    return result
 
-async def _validate_credentials(hass, sid: str, uuid: str, time_zone: str) -> bool:
+
+def _validate_cookie_string(cookie_string: str) -> tuple[str | None, dict[str, str]]:
+    """
+    Validate cookie string and return parsed values.
+    
+    Returns:
+        (error_key, parsed_values) - error_key is None if valid
+    """
+    if not cookie_string or len(cookie_string) < 50:
+        return ("cookie_too_short", {})
+    
+    parsed = _parse_cookie_string(cookie_string)
+    
+    if not parsed["sid"]:
+        return ("sid_not_found", {})
+    
+    if not parsed["sid"].startswith("QA."):
+        return ("invalid_sid", {})
+    
+    if not parsed["session_id"]:
+        return ("session_not_found", {})
+    
+    if "-" not in parsed["session_id"]:
+        return ("invalid_session", {})
+    
+    return (None, parsed)
+
+
+async def _validate_credentials(hass, sid: str, session_id: str, time_zone: str) -> bool:
     """Validate credentials by making a test API call. Returns True if valid."""
     def _get_locale_code(tz: str) -> str:
         if tz.startswith("America/"):
@@ -76,61 +126,63 @@ async def _validate_credentials(hass, sid: str, uuid: str, time_zone: str) -> bo
             locale_code = _get_locale_code(time_zone)
             url = f"{ENDPOINT}?localeCode={locale_code}"
             headers = HEADERS_TEMPLATE.copy()
-            headers["Cookie"] = f"sid={sid}; _userUuid={uuid}"
+            headers["Cookie"] = f"sid={sid}; uev2.id.session={session_id}"
             payload = {"orderUuid": None, "timezone": time_zone, "showAppUpsellIllustration": True}
             
             async with session.post(url, json=payload, headers=headers) as resp:
                 if resp.status == 200:
-                    # Try to parse the response to ensure it's valid JSON
                     data = await resp.json()
-                    # If we get valid data (even if empty orders), credentials are valid
                     return "data" in data
                 return False
     except Exception as e:
         _LOGGER.debug("Credential validation error: %s", e)
         return False
 
+
 class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 1
+    VERSION = 2  # Bumped for new config schema
 
     async def async_step_user(self, user_input=None) -> FlowResult:
+        """Handle initial setup."""
         errors: dict[str, str] = {}
         ha_tz = self.hass.config.time_zone or "UTC"
 
         if user_input:
-            sid = user_input.get(CONF_SID, "").strip()
-            uuid = user_input.get(CONF_UUID, "").strip()
+            cookie_string = user_input.get(CONF_COOKIE, "").strip()
             account_name = user_input.get(CONF_ACCOUNT_NAME, "").strip()
             tz_selected = user_input.get(CONF_TIME_ZONE, ha_tz)
 
-            # --- Validations ---
-            sid_err = _validate_sid(sid)
-            if sid_err:
-                errors[CONF_SID] = sid_err
-
-            uuid_err = _validate_uuid(uuid)
-            if uuid_err:
-                errors[CONF_UUID] = uuid_err
-
+            # Validate account name
             if not account_name:
                 errors[CONF_ACCOUNT_NAME] = "entry_too_short"
 
-            # Keep dropdown, but require it equals HA's timezone
+            # Validate timezone
             if tz_selected != ha_tz:
                 errors[CONF_TIME_ZONE] = "invalid_time_zone"
+
+            # Validate and parse cookie string
+            cookie_err, parsed = _validate_cookie_string(cookie_string)
+            if cookie_err:
+                errors[CONF_COOKIE] = cookie_err
 
             # If fields pass, try a live refresh to validate creds
             if not errors:
                 try:
-                    is_valid = await _validate_credentials(self.hass, sid, uuid, ha_tz)
+                    is_valid = await _validate_credentials(
+                        self.hass,
+                        parsed["sid"],
+                        parsed["session_id"],
+                        ha_tz
+                    )
                     if not is_valid:
                         errors["base"] = "invalid_credentials"
                     else:
+                        # Store parsed values, not full cookie string (security)
                         return self.async_create_entry(
                             title=account_name,
                             data={
-                                CONF_SID: sid,
-                                CONF_UUID: uuid,
+                                CONF_SID: parsed["sid"],
+                                CONF_SESSION_ID: parsed["session_id"],
                                 CONF_ACCOUNT_NAME: account_name,
                                 CONF_TIME_ZONE: ha_tz,
                             },
@@ -139,29 +191,110 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.exception("Error during integration setup: %s", e)
                     errors["base"] = "unknown_error"
 
-        # Schema with the full dropdown; default = HA timezone
         schema = vol.Schema(
             {
-                vol.Required(CONF_SID): str,
-                vol.Required(CONF_UUID): str,
                 vol.Required(CONF_ACCOUNT_NAME): str,
                 vol.Required(CONF_TIME_ZONE, default=ha_tz): vol.In(TIME_ZONES),
+                vol.Required(CONF_COOKIE): str,
             }
-        )
-
-        # A clear, per-field explainer (title + description)
-        desc = (
-            "**SID** — Session ID from ubereats.com cookies. Must be ≥30 chars and start with `QA.`\n"
-            "**UUID** — User UUID from cookies/headers. Must be ≥20 chars and include `-`.\n"
-            "**Account name** — Just a nickname (e.g., `Personal`, `Work`).\n"
-            f"**Time zone** — Select **{ha_tz}** (locked to your Home Assistant time zone; others will be rejected)."
         )
 
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
-            description_placeholders={
-                "field_help": desc,
-            },
             errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration of existing entry."""
+        errors: dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+        if user_input is not None:
+            cookie_string = user_input.get(CONF_COOKIE, "").strip()
+
+            # Validate and parse cookie string
+            cookie_err, parsed = _validate_cookie_string(cookie_string)
+            if cookie_err:
+                errors[CONF_COOKIE] = cookie_err
+
+            if not errors:
+                is_valid = await _validate_credentials(
+                    self.hass,
+                    parsed["sid"],
+                    parsed["session_id"],
+                    entry.data[CONF_TIME_ZONE]
+                )
+                if is_valid:
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data={
+                            **entry.data,
+                            CONF_SID: parsed["sid"],
+                            CONF_SESSION_ID: parsed["session_id"]
+                        },
+                    )
+                errors["base"] = "invalid_credentials"
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({
+                vol.Required(CONF_COOKIE): str,
+            }),
+            errors=errors,
+            description_placeholders={
+                "account_name": entry.data[CONF_ACCOUNT_NAME]
+            },
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> FlowResult:
+        """Handle reauthentication request."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm reauthentication with new credentials."""
+        errors: dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+        if user_input is not None:
+            cookie_string = user_input.get(CONF_COOKIE, "").strip()
+
+            # Validate and parse cookie string
+            cookie_err, parsed = _validate_cookie_string(cookie_string)
+            if cookie_err:
+                errors[CONF_COOKIE] = cookie_err
+
+            if not errors:
+                is_valid = await _validate_credentials(
+                    self.hass,
+                    parsed["sid"],
+                    parsed["session_id"],
+                    entry.data[CONF_TIME_ZONE]
+                )
+                if is_valid:
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data={
+                            **entry.data,
+                            CONF_SID: parsed["sid"],
+                            CONF_SESSION_ID: parsed["session_id"]
+                        },
+                    )
+                errors["base"] = "invalid_credentials"
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({
+                vol.Required(CONF_COOKIE): str,
+            }),
+            errors=errors,
+            description_placeholders={
+                "account_name": entry.data[CONF_ACCOUNT_NAME]
+            },
         )
