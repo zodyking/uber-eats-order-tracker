@@ -349,7 +349,7 @@ class UberEatsPanel extends HTMLElement {
             grid-template-columns: 1fr;
           }
           .card-map {
-            height: 220px;
+            height: 200px;
           }
         }
         
@@ -428,7 +428,7 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .card-map {
-          height: 240px;
+          height: 180px;
           background: #111;
           position: relative;
         }
@@ -443,7 +443,7 @@ class UberEatsPanel extends HTMLElement {
         .map-overlay {
           position: absolute;
           top: 8px;
-          left: 8px;
+          right: 8px;
           background: rgba(0,0,0,0.8);
           padding: 6px 12px;
           border-radius: 6px;
