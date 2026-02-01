@@ -1,116 +1,64 @@
 # Changelog
 
-All notable changes to this integration will be documented in this file.
+All notable changes to this project will be documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+---
 
-## [1.2.0] - 2025-01-31
+## Version 1.2.0
 
-### Added
-- **Sidebar Panel** — Dedicated Uber Eats panel in Home Assistant sidebar
-  - View all accounts and order status at a glance
-  - Real-time map showing driver location or home when idle
-  - Step-by-step instructions page for adding new accounts
-  - Edit and delete accounts directly from the panel
-  - Uber Eats dark theme (#0f0f0f background, #06C167 accents)
-  - Connection status indicator (Connected/Error/Retrying)
-  - Auto-refresh every 15 seconds
-- **Device Tracker Entity** — Map card compatible driver tracking
-  - Shows driver location when order is active and driver assigned
-  - Automatically falls back to home location when no active order
-  - Compatible with Home Assistant Map card
-  - Includes driver name, ETA, street address as attributes
-- **WebSocket API** — Backend communication for sidebar panel
-  - `uber_eats/get_accounts` — Get all configured accounts with status
-  - `uber_eats/get_account_data` — Get detailed data for specific account
-  - `uber_eats/delete_account` — Remove an account
-- **GitHub Issue Templates** — YAML form-based templates
-  - Bug report template with dropdowns and checkboxes
-  - Feature request template with structured fields
+**Released:** January 31, 2025
 
-### Changed
-- Panel cards now show useful sensor fields (Order Status, Restaurant, Driver, Location)
-- Map height increased to 240px to avoid footer overlap
-- Map overlay moved to top-left corner
-- Removed timezone display from inactive account cards
+### What's New
 
-## [1.1.0] - 2025-01-31
+#### Sidebar Panel
+A dedicated Uber Eats panel has been added to your Home Assistant sidebar. From here you can:
+- View all your accounts and their current order status
+- See a real-time map showing driver location (or your home when no order is active)
+- Follow step-by-step instructions for adding new accounts
+- Edit or delete accounts without leaving the panel
+- Monitor connection status for each account
 
-### Added
-- Initial sidebar panel implementation
-- Device tracker for map integration
+The panel features an Uber Eats-inspired dark theme for a familiar look and feel.
 
-## [1.0.0] - 2025-01-31
+#### Device Tracker
+A new device tracker entity makes it easy to display your driver's location on any Home Assistant Map card. The tracker:
+- Shows the driver's real-time position when you have an active order
+- Automatically switches to your home location when there's no delivery in progress
+- Includes helpful attributes like driver name, ETA, and street address
 
-### Added
-- **Single Cookie String Input** — Users now paste the full cookie string from browser DevTools
-  - Integration automatically extracts `sid` and `uev2.id.session` values
-  - No need to manually find individual cookie values
-  - Comprehensive validation with helpful error messages
-- **Reconfigure Flow** — Update cookies without deleting the integration
-  - Access via Settings → Devices & Services → Uber Eats → ⋮ → Reconfigure
-  - All entities and automations remain intact
-- **Reauthentication Flow** — Automatic prompts when session expires
-  - Integration detects 401/403 responses and triggers reauth
-  - User-friendly notification to update cookies
-- **Dual API Validation** — Config flow validates against both endpoints
-  - Tests `getActiveOrdersV1` and `getPastOrdersV1` during setup
-  - More reliable credential verification
+#### Simplified Authentication
+Setting up the integration is now much easier:
+- Just paste your full cookie string from the browser — no need to hunt for specific values
+- The integration automatically extracts what it needs (`sid` and `uev2.id.session`)
+- Clear error messages guide you if something's missing
 
-### Changed
-- **Cookie Authentication** — Switched from `uuid` to `uev2.id.session`
-  - Fixes authentication issues reported by users
-  - `uuid` cookie no longer works with Uber Eats API
-- **Field Naming** — Renamed "Account Name" to "Account Nickname"
-  - Clearer terminology for users
-- **Config Flow Version** — Updated to version 2 for migration support
-- **Cookie Header Format** — Now uses `sid={sid}; uev2.id.session={session_id}`
+#### Easy Cookie Updates
+When your session expires (typically every 4-6 weeks), you no longer need to delete and re-add the integration:
+- Use the **Reconfigure** option to update your cookie
+- All your entities, automations, and settings stay intact
+- The integration will prompt you automatically when reauthentication is needed
 
-### Fixed
-- Authentication failures due to deprecated `uuid` cookie
-- Users no longer need to manually edit configuration files to update cookies
+#### Better Reliability
+- Authentication now uses the updated `uev2.id.session` cookie (replacing the deprecated `uuid`)
+- Credentials are validated against two API endpoints during setup for more reliable verification
+- Improved error handling with clearer messages when things go wrong
+- Fixed compatibility issues with Home Assistant 2025.11 and later
 
-### Security
-- Full cookie string is parsed but only required values (`sid`, `session_id`) are stored
-- Sensitive cookie data is not logged
+#### All the Sensors You Need
+Track every detail of your order with sensors for:
+- Order stage and status
+- Driver name and ETA (with minutes remaining)
+- Restaurant name
+- Driver location (latitude, longitude, street, suburb, full address)
+- Order history
 
-## [0.9.1] - 2025-01-XX
+Plus a binary sensor that tells you when an order is active.
 
-### Fixed
-- Fixed integration setup error in Home Assistant 2025.11+ by replacing `async_config_entry_first_refresh()` with direct credential validation
-- Added missing timezone `America/Costa_Rica` to timezone selection dropdown
-- Improved error handling during integration setup with proper exception catching and user-friendly error messages
-- Enhanced error logging with full stack traces for better debugging
+#### Multi-Account Support
+Add multiple Uber Eats accounts with unique nicknames. Each account is tracked independently with its own set of sensors.
 
-### Changed
-- Credential validation now uses direct API calls instead of coordinator refresh during config flow
-- Error messages are now more descriptive and include guidance to check logs
+---
 
-### Added
-- Comprehensive exception handling in config flow and integration setup
-- Better error logging throughout the integration
-- Translation support for unknown errors
+## Previous Versions
 
-## [0.9.0] - 2025-01-XX
-
-### Added
-- **Order Tracking** — Real-time monitoring with 15-second updates
-- **Sensors** — Comprehensive entity coverage:
-  - Order stage and status
-  - Driver name and ETA
-  - Restaurant name
-  - Order ID and history
-  - Driver latitude/longitude
-  - Driver location (street, suburb, quarter, county, full address)
-- **Binary Sensor** — Active order detection
-- **Multi-Account Support** — Track multiple Uber Eats accounts
-- **Reverse Geocoding** — Driver location converted to street addresses using OpenStreetMap Nominatim
-- **Order History** — Track past orders with history attribute
-- **Time Zone Support** — Configurable timezone for accurate API calls
-- **HACS Support** — Easy installation via Home Assistant Community Store
-
-### Technical
-- Uses `aiohttp` for async HTTP requests
-- `DataUpdateCoordinator` for efficient data management
-- Automatic label creation for entity organization
+Initial beta releases focused on core order tracking functionality, real-time updates, and reverse geocoding using OpenStreetMap.
