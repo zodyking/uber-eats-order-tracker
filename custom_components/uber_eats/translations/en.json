@@ -5,25 +5,50 @@
         "title": "Uber Eats",
         "description": "Connect your Uber Eats account.",
         "data": {
-          "sid": "SID",
-          "uuid": "UUID",
-          "account_name": "Account name",
-          "time_zone": "Time zone"
+          "account_name": "Account Name",
+          "time_zone": "Time Zone",
+          "cookie": "Cookie String"
         },
         "data_description": {
-          "sid": "Session ID from ubereats.com cookies. Must be at least 30 characters and start with \"QA.\"",
-          "uuid": "User UUID from cookies/headers. Must be at least 20 characters and include a dash \"-\".",
-          "account_name": "Just a nickname for this account (e.g., Personal, Work).",
-          "time_zone": "Must match Home Assistant’s time zone. Other selections will be rejected."
+          "account_name": "A nickname for this account (e.g., Personal, Work).",
+          "time_zone": "Must match Home Assistant's time zone.",
+          "cookie": "Full cookie string from ubereats.com. Open DevTools (F12) → Network tab → refresh page → click any request → copy 'Cookie' header value."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Uber Eats",
+        "description": "Update cookie for account: {account_name}",
+        "data": {
+          "cookie": "Cookie String"
+        },
+        "data_description": {
+          "cookie": "Full cookie string from ubereats.com. Open DevTools (F12) → Network tab → copy 'Cookie' header."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Session Expired",
+        "description": "Your Uber Eats session has expired for account: {account_name}. Please provide a fresh cookie.",
+        "data": {
+          "cookie": "Cookie String"
+        },
+        "data_description": {
+          "cookie": "Full cookie string from ubereats.com. Open DevTools (F12) → Network tab → copy 'Cookie' header."
         }
       }
     },
+    "abort": {
+      "reauth_successful": "Reauthentication successful.",
+      "reconfigure_successful": "Reconfiguration successful."
+    },
     "error": {
       "entry_too_short": "Entry too short.",
-      "must_include_dash": "Must include a dash \"-\".",
-      "must_start_with_qa": "Must start with \"QA.\"",
+      "cookie_too_short": "Cookie string is too short. Make sure you copied the entire cookie.",
+      "sid_not_found": "Could not find 'sid' in cookie string. Make sure you're logged in to ubereats.com.",
+      "invalid_sid": "Invalid SID format. The 'sid' cookie should start with 'QA.'",
+      "session_not_found": "Could not find 'uev2.id.session' in cookie string. Try refreshing ubereats.com and copying the cookie again.",
+      "invalid_session": "Invalid session format.",
       "invalid_time_zone": "Select your Home Assistant time zone.",
-      "invalid_credentials": "Unable to validate credentials. Check SID/UUID and try again.",
+      "invalid_credentials": "Unable to validate credentials. Cookie may be expired or invalid.",
       "unknown_error": "An unexpected error occurred. Check logs for details."
     }
   }

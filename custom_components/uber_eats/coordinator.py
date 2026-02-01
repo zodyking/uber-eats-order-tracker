@@ -1,18 +1,19 @@
-import asyncio
 import aiohttp
 import logging
-from datetime import datetime, timedelta  # ← ensure timedelta is imported
+from datetime import datetime, timedelta
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util import dt as dt_util
 
 from .const import ENDPOINT, HEADERS_TEMPLATE
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class UberEatsCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, sid, uuid, account_name, time_zone):
+    def __init__(self, hass, sid, session_id, account_name, time_zone):
         self.sid = sid
-        self.uuid = uuid
+        self.session_id = session_id  # Renamed from uuid
         self.account_name = account_name
         self.time_zone = time_zone
         self.hass = hass
@@ -29,15 +30,35 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             locale_code = self._get_locale_code(self.time_zone)
             url = f"{ENDPOINT}?localeCode={locale_code}"
             headers = HEADERS_TEMPLATE.copy()
-            headers["Cookie"] = f"sid={self.sid}; _userUuid={self.uuid}"
+            headers["Cookie"] = f"sid={self.sid}; uev2.id.session={self.session_id}"
             payload = {"orderUuid": None, "timezone": self.time_zone, "showAppUpsellIllustration": True}
             try:
                 async with session.post(url, json=payload, headers=headers) as resp:
-                    _LOGGER.info("API response status: %s", resp.status)
+                    _LOGGER.debug("API response status: %s", resp.status)
+                    
+                    # Detect authentication failure (401/403)
+                    if resp.status in (401, 403):
+                        raise ConfigEntryAuthFailed(
+                            "Session expired. Please reconfigure with new cookies."
+                        )
+                    
                     if resp.status != 200:
+                        _LOGGER.warning(
+                            "API returned status %s - may indicate auth issue",
+                            resp.status
+                        )
                         return self._default_data()
 
                     data = await resp.json()
+                    
+                    # Check for auth errors in response body
+                    if "error" in data:
+                        error_code = data.get("error", {}).get("code", "")
+                        if error_code in ("UNAUTHORIZED", "SESSION_EXPIRED", "INVALID_TOKEN"):
+                            raise ConfigEntryAuthFailed(
+                                f"Authentication error: {error_code}"
+                            )
+                    
                     orders = data.get("data", {}).get("orders", [])
                     current_data = self._default_data()
 
@@ -108,6 +129,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
 
                     return current_data
 
+            except ConfigEntryAuthFailed:
+                raise  # Re-raise auth failures for HA to handle
             except Exception as err:
                 _LOGGER.error("Error fetching data: %s", err, exc_info=True)
                 return self._default_data()
@@ -213,5 +236,6 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "https://www.openstreetmap.org/export/embed.html"
             f"?bbox={min_lon}%2C{min_lat}%2C{max_lon}%2C{max_lat}&layer=mapnik&marker={lat}%2C{lon}"
         )
+
 
 __all__ = ["UberEatsCoordinator"]

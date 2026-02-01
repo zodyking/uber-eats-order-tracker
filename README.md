@@ -13,6 +13,8 @@ Custom Home Assistant integration to track live Uber Eats orders, including enti
 - Supports multiple accounts with unique names.
 - Time zone selection for accurate API calls.
 - Defaults to home address for location when no order.
+- **Reconfigure flow** — easily update cookies without deleting the integration.
+- **Reauthentication flow** — automatic prompts when session expires.
 
 ## Installation
 
@@ -36,21 +38,33 @@ Or use this button:
 3. Restart HA.
 4. Add via UI.
 
-## Getting UUID & SID
+## Getting the Cookie String
+
 1. Log into [www.ubereats.com](https://www.ubereats.com) in a web browser (e.g., Chrome).
 2. Open Developer Tools (F12 or right-click > Inspect).
-3. Go to the "Network" tab > "Search GetActiveOrdersV1".
-4. Find the "sid" cookie and copy its value (long string, e.g., starting with "QA.CAESEF...").
-5. Find the "_userUuid" cookie and copy its value (long string).
-Both required fields are stored in the same place under GetActiveOrdersV1 in the cookies section!
+3. Go to the **Network** tab.
+4. Refresh the page or navigate to any page on ubereats.com.
+5. Click on any request in the list (e.g., `getActiveOrdersV1` or any other).
+6. In the **Headers** tab, find **Request Headers**.
+7. Look for the **Cookie** header and copy the **entire value** (it's a long string).
 
 <img width="886" height="590" alt="image" src="https://github.com/user-attachments/assets/c37132cd-3b28-44f3-83a3-56ed85e290b7" />
 
+**That's it!** The integration will automatically extract the required `sid` and `uev2.id.session` values from the cookie string.
 
 ## Configuration
-- **SID and UUID**: From Uber Eats browser cookies (see above).
-- **Account Name**: Unique name (e.g., "Personal").
-- **Time Zone**: Select from dropdown (used for API).
+- **Account Name**: Unique name (e.g., "Personal", "Work").
+- **Time Zone**: Select from dropdown (must match your Home Assistant time zone).
+- **Cookie String**: Full cookie string copied from browser DevTools (see above).
+
+## Updating Cookies (When Session Expires)
+
+Sessions typically expire every 4-6 weeks. When this happens:
+
+1. Go to **Settings** > **Devices & Services** > **Uber Eats**.
+2. Click the 3-dot menu > **Reconfigure**.
+3. Paste your new cookie string.
+4. Done! Your automations and entities remain intact.
 
 ## Entities
 - binary_sensor.<account>_uber_eats_active_order
@@ -68,7 +82,7 @@ Both required fields are stored in the same place under GetActiveOrdersV1 in the
 - sensor.<account>_uber_eats_driver_location (cross street)
 
 ## Automation
-Please use the official bluepint to easily setup tts messages/updates from uber. 100% hasle free!
+Please use the official blueprint to easily setup TTS messages/updates from Uber. 100% hassle free!
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fzodyking%2FUber-Eats-Active-Order-Updates-TTS-Blueprint%2Fblob%2Fmain%2Fuber_eats_updates_tts.yaml)
 
