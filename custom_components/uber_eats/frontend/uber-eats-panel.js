@@ -349,7 +349,7 @@ class UberEatsPanel extends HTMLElement {
             grid-template-columns: 1fr;
           }
           .card-map {
-            height: 200px;
+            height: 220px;
           }
         }
         
@@ -428,7 +428,7 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .card-map {
-          height: 180px;
+          height: 240px;
           background: #111;
           position: relative;
         }
@@ -442,12 +442,13 @@ class UberEatsPanel extends HTMLElement {
         
         .map-overlay {
           position: absolute;
-          bottom: 8px;
+          top: 8px;
           left: 8px;
-          background: rgba(0,0,0,0.7);
-          padding: 4px 10px;
-          border-radius: 4px;
-          font-size: 11px;
+          background: rgba(0,0,0,0.8);
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 500;
           color: #06C167;
         }
         
@@ -856,6 +857,9 @@ class UberEatsPanel extends HTMLElement {
     const mapLabel = isActive && account.driver_name !== "No Driver Assigned" 
       ? "📍 Driver Location" 
       : "🏠 Home";
+    
+    // Get driver location street for display
+    const driverStreet = account.driver_location?.street || "Unknown";
 
     return `
       <div class="${cardClass}" data-entry-id="${account.entry_id}">
@@ -871,29 +875,25 @@ class UberEatsPanel extends HTMLElement {
             <div class="card-details">
               ${isActive ? `
                 <div class="detail-item">
-                  <span class="detail-label">Restaurant</span>
-                  <span class="detail-value">${account.restaurant_name}</span>
+                  <span class="detail-label">Order Status</span>
+                  <span class="detail-value">${account.order_status}</span>
                 </div>
                 <div class="detail-item">
-                  <span class="detail-label">Stage</span>
-                  <span class="detail-value">${account.order_stage}</span>
+                  <span class="detail-label">Restaurant</span>
+                  <span class="detail-value">${account.restaurant_name}</span>
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Driver</span>
                   <span class="detail-value">${account.driver_name}</span>
                 </div>
                 <div class="detail-item">
-                  <span class="detail-label">ETA</span>
-                  <span class="detail-value highlight">${account.driver_eta}</span>
+                  <span class="detail-label">Location</span>
+                  <span class="detail-value">${driverStreet !== "Unknown" && driverStreet !== "Home" ? driverStreet : "Awaiting driver"}</span>
                 </div>
               ` : `
-                <div class="detail-item">
-                  <span class="detail-label">Time Zone</span>
-                  <span class="detail-value">${account.time_zone}</span>
-                </div>
-                <div class="detail-item">
+                <div class="detail-item" style="grid-column: span 2;">
                   <span class="detail-label">Status</span>
-                  <span class="detail-value">Waiting for orders</span>
+                  <span class="detail-value" style="color: #888;">Waiting for orders...</span>
                 </div>
               `}
             </div>
