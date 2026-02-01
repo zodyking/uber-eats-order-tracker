@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Community Discussion
+    url: https://community.home-assistant.io/t/uber-eats-integration-beta-now-available/936955
+    about: Ask questions and discuss with other users
+  - name: 📖 Documentation
+    url: https://github.com/zodyking/uber-eats-order-tracker#readme
+    about: Read the documentation before opening an issue
