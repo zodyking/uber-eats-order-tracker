@@ -5,12 +5,12 @@
         "title": "Uber Eats",
         "description": "Connect your Uber Eats account.",
         "data": {
-          "account_name": "Account Name",
+          "account_name": "Account Nickname",
           "time_zone": "Time Zone",
           "cookie": "Cookie String"
         },
         "data_description": {
-          "account_name": "A nickname for this account (e.g., Personal, Work).",
+          "account_name": "A friendly name for this account (e.g., Personal, Work).",
           "time_zone": "Must match Home Assistant's time zone.",
           "cookie": "Full cookie string from ubereats.com. Open DevTools (F12) → Network tab → refresh page → click any request → copy 'Cookie' header value."
         }
