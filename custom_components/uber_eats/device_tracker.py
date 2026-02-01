@@ -49,25 +49,35 @@ class UberEatsDriverTracker(CoordinatorEntity, TrackerEntity):
 
     @property
     def latitude(self) -> float | None:
-        """Return latitude value of the driver."""
+        """Return latitude value of the driver, or home location if no active order."""
+        if not self.coordinator.data.get("active", False):
+            # Return HA home latitude when no active order
+            return self.coordinator.hass.config.latitude
+        
         lat = self.coordinator.data.get("driver_location_lat")
         if lat is None or lat == "No Active Order" or not isinstance(lat, (int, float)):
-            return None
+            # Fallback to home if driver location not available yet
+            return self.coordinator.hass.config.latitude
         return float(lat)
 
     @property
     def longitude(self) -> float | None:
-        """Return longitude value of the driver."""
+        """Return longitude value of the driver, or home location if no active order."""
+        if not self.coordinator.data.get("active", False):
+            # Return HA home longitude when no active order
+            return self.coordinator.hass.config.longitude
+        
         lon = self.coordinator.data.get("driver_location_lon")
         if lon is None or lon == "No Active Order" or not isinstance(lon, (int, float)):
-            return None
+            # Fallback to home if driver location not available yet
+            return self.coordinator.hass.config.longitude
         return float(lon)
 
     @property
     def location_name(self) -> str | None:
         """Return a location name for the driver."""
         if not self.coordinator.data.get("active", False):
-            return "No Active Order"
+            return "home"
         
         street = self.coordinator.data.get("driver_location_street", "")
         if street and street != "No Driver Assigned":
@@ -93,11 +103,11 @@ class UberEatsDriverTracker(CoordinatorEntity, TrackerEntity):
     def state(self) -> str | None:
         """Return the state of the tracker."""
         if not self.coordinator.data.get("active", False):
-            return "not_home"
+            return "home"  # At home location when no active order
         
         # Return order stage as state when active
         stage = self.coordinator.data.get("order_stage", "unknown")
-        return stage if stage != "No Active Order" else "not_home"
+        return stage if stage != "No Active Order" else "home"
 
     @property
     def available(self) -> bool:
