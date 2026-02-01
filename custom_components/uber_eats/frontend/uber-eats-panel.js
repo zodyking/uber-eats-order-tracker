@@ -55,8 +55,15 @@ class UberEatsPanel extends HTMLElement {
   }
 
   _startAutoRefresh() {
-    this._refreshInterval = setInterval(() => {
-      this._loadAccounts();
+    this._refreshInterval = setInterval(async () => {
+      await this._loadAccounts();
+      if (this._currentView === "account-details" && this._selectedAccount?.entry_id) {
+        const details = await this._loadAccountDetails(this._selectedAccount.entry_id);
+        if (details) {
+          this._selectedAccount = details;
+          this._render();
+        }
+      }
     }, 15000);
   }
 
@@ -701,6 +708,37 @@ class UberEatsPanel extends HTMLElement {
           animation: none;
         }
         
+        .menu-btn {
+          display: none;
+          width: 40px;
+          height: 40px;
+          border-radius: 8px;
+          border: none;
+          background: transparent;
+          color: var(--primary-text-color, #fff);
+          cursor: pointer;
+          align-items: center;
+          justify-content: center;
+          margin-right: 8px;
+          flex-shrink: 0;
+        }
+        
+        .menu-btn svg {
+          width: 24px;
+          height: 24px;
+          fill: currentColor;
+        }
+        
+        .menu-btn:hover {
+          background: rgba(255, 255, 255, 0.08);
+        }
+        
+        @media (max-width: 870px) {
+          .menu-btn {
+            display: flex;
+          }
+        }
+        
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
@@ -820,6 +858,9 @@ class UberEatsPanel extends HTMLElement {
 
     return `
       <div class="header">
+        <button class="menu-btn" id="menu-btn" title="Menu">
+          <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
+        </button>
         ${UBER_EATS_LOGO_SIMPLE}
         <button class="btn btn-primary" id="add-account-btn">
           <span>+</span> Add Account
@@ -917,6 +958,9 @@ class UberEatsPanel extends HTMLElement {
   _renderInstructionsPage() {
     return `
       <div class="header">
+        <button class="menu-btn" id="menu-btn" title="Menu">
+          <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
+        </button>
         <button class="btn-icon" id="back-btn">←</button>
         ${UBER_EATS_LOGO_SIMPLE}
         <div></div>
@@ -1014,6 +1058,9 @@ class UberEatsPanel extends HTMLElement {
     return `
       <div class="details-page">
         <div class="details-header">
+          <button class="menu-btn" id="menu-btn" title="Menu">
+            <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
+          </button>
           <button class="btn-icon" id="back-btn">←</button>
           <h2>${acc.account_name}</h2>
           <div class="connection-indicator">
@@ -1088,12 +1135,7 @@ class UberEatsPanel extends HTMLElement {
                     <span class="info-label">Order ID</span>
                     <span class="info-value" style="font-family:monospace;font-size:12px;">${acc.order_id?.substring(0, 16) || "N/A"}...</span>
                   </div>
-                ` : `
-                  <div class="info-row">
-                    <span class="info-label">Time Zone</span>
-                    <span class="info-value">${acc.time_zone}</span>
-                  </div>
-                `}
+                ` : ""}
               </div>
               
               ${isActive ? `
@@ -1160,7 +1202,20 @@ class UberEatsPanel extends HTMLElement {
     `;
   }
 
+  _toggleSidebar() {
+    const event = new Event("hass-toggle-menu", { bubbles: true, composed: true });
+    this.dispatchEvent(event);
+  }
+
+  _attachMenuButton() {
+    const menuBtn = this.shadowRoot.querySelector("#menu-btn");
+    if (menuBtn) {
+      menuBtn.addEventListener("click", () => this._toggleSidebar());
+    }
+  }
+
   _attachEventListeners() {
+    this._attachMenuButton();
     // Add account buttons
     const addBtn = this.shadowRoot.querySelector("#add-account-btn");
     const addBtnEmpty = this.shadowRoot.querySelector("#add-account-empty-btn");
