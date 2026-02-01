@@ -2,6 +2,26 @@
  * Uber Eats Panel for Home Assistant
  * Displays accounts, order status, and driver location on map
  */
+
+// Uber Eats Logo SVG (official style)
+const UBER_EATS_LOGO = `
+<svg viewBox="0 0 134 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="uber-eats-logo">
+  <path d="M5.24 17.76C2.08 17.76 0 15.48 0 12.16V5.2H2.72V12.04C2.72 14 3.6 15.28 5.24 15.28C6.88 15.28 7.76 14 7.76 12.04V5.2H10.48V12.16C10.48 15.48 8.4 17.76 5.24 17.76ZM18.52 17.52H15.8V16.56C15.08 17.28 14.04 17.76 12.76 17.76C11.08 17.76 9.64 16.64 9.64 14.96C9.64 13.04 11.24 12.24 13.44 12.24H15.56V12C15.56 10.96 14.96 10.28 13.68 10.28C12.68 10.28 11.88 10.64 11.12 11.2L10 9.36C11.08 8.52 12.48 8 14 8C16.84 8 18.28 9.52 18.28 12.08V17.52H18.52ZM15.56 14.92V13.88H13.8C12.76 13.88 12.2 14.24 12.2 14.88C12.2 15.52 12.76 15.92 13.6 15.92C14.52 15.92 15.24 15.52 15.56 14.92ZM25.4 17.76C22.52 17.76 20.28 15.68 20.28 12.88C20.28 10.08 22.52 8 25.4 8C27.56 8 29.08 9.12 29.76 10.72L27.4 11.84C27.08 11.04 26.36 10.48 25.4 10.48C23.96 10.48 22.92 11.52 22.92 12.88C22.92 14.24 23.96 15.28 25.4 15.28C26.36 15.28 27.08 14.72 27.4 13.92L29.76 15.04C29.08 16.64 27.56 17.76 25.4 17.76ZM36.68 17.52H33.96V16.4C33.24 17.2 32.2 17.76 30.92 17.76C28.68 17.76 27.24 16.2 27.24 13.68V8.24H29.96V13.12C29.96 14.52 30.6 15.28 31.8 15.28C32.92 15.28 33.72 14.52 33.72 13.12V8.24H36.68V17.52ZM44.04 17.52H38.28V5.2H48.04V7.68H41V10.08H47.44V12.56H41V15.04H48.04V17.52H44.04Z" fill="white"/>
+  <path d="M56.24 17.76C53.08 17.76 51 15.48 51 12.16V5.2H53.72V12.04C53.72 14 54.6 15.28 56.24 15.28C57.88 15.28 58.76 14 58.76 12.04V5.2H61.48V12.16C61.48 15.48 59.4 17.76 56.24 17.76Z" fill="#06C167"/>
+  <path d="M69.52 17.52H66.8V16.56C66.08 17.28 65.04 17.76 63.76 17.76C62.08 17.76 60.64 16.64 60.64 14.96C60.64 13.04 62.24 12.24 64.44 12.24H66.56V12C66.56 10.96 65.96 10.28 64.68 10.28C63.68 10.28 62.88 10.64 62.12 11.2L61 9.36C62.08 8.52 63.48 8 65 8C67.84 8 69.28 9.52 69.28 12.08V17.52H69.52ZM66.56 14.92V13.88H64.8C63.76 13.88 63.2 14.24 63.2 14.88C63.2 15.52 63.76 15.92 64.6 15.92C65.52 15.92 66.24 15.52 66.56 14.92Z" fill="#06C167"/>
+  <path d="M77.16 17.52H74.44V16.52C73.8 17.28 72.84 17.76 71.68 17.76C69.6 17.76 68.08 16.24 68.08 13.68V8.24H70.8V13.12C70.8 14.52 71.48 15.24 72.6 15.24C73.64 15.24 74.44 14.52 74.44 13.12V8.24H77.16V17.52Z" fill="#06C167"/>
+  <path d="M84.6 17.52H78.84V15.36L82.2 11.68C82.8 11.04 83.16 10.56 83.16 10.04C83.16 9.36 82.6 8.92 81.8 8.92C80.96 8.92 80.28 9.4 79.68 10.12L77.88 8.64C78.84 7.44 80.28 6.64 82.04 6.64C84.36 6.64 85.92 8.04 85.92 9.92C85.92 11.04 85.4 11.96 84.28 13.16L82.36 15.2H86.04V17.52H84.6Z" fill="#06C167"/>
+</svg>
+`;
+
+// Alternative simpler logo using emoji + text
+const UBER_EATS_LOGO_SIMPLE = `
+<span class="logo-container">
+  <span class="logo-icon">🍔</span>
+  <span class="logo-text">Uber<span class="logo-eats">Eats</span></span>
+</span>
+`;
+
 class UberEatsPanel extends HTMLElement {
   constructor() {
     super();
@@ -9,6 +29,7 @@ class UberEatsPanel extends HTMLElement {
     this._hass = null;
     this._accounts = [];
     this._selectedAccount = null;
+    this._currentView = "main"; // main, instructions, account-details
     this._refreshInterval = null;
   }
 
@@ -36,7 +57,7 @@ class UberEatsPanel extends HTMLElement {
   _startAutoRefresh() {
     this._refreshInterval = setInterval(() => {
       this._loadAccounts();
-    }, 15000); // Refresh every 15 seconds
+    }, 15000);
   }
 
   _stopAutoRefresh() {
@@ -78,7 +99,7 @@ class UberEatsPanel extends HTMLElement {
   async _deleteAccount(entryId) {
     if (!this._hass) return;
     
-    if (!confirm("Are you sure you want to delete this account?")) {
+    if (!confirm("Are you sure you want to delete this account? This cannot be undone.")) {
       return;
     }
     
@@ -88,6 +109,7 @@ class UberEatsPanel extends HTMLElement {
         entry_id: entryId,
       });
       this._selectedAccount = null;
+      this._currentView = "main";
       await this._loadAccounts();
     } catch (e) {
       console.error("Failed to delete account:", e);
@@ -95,13 +117,17 @@ class UberEatsPanel extends HTMLElement {
     }
   }
 
-  _addAccount() {
+  _showInstructions() {
+    this._currentView = "instructions";
+    this._render();
+  }
+
+  _continueToAddAccount() {
     // Navigate to config flow
     window.location.href = "/config/integrations/integration/uber_eats";
   }
 
   _reconfigureAccount(entryId) {
-    // Navigate to reconfigure flow
     window.location.href = `/config/integrations/integration/uber_eats#config_entry=${entryId}`;
   }
 
@@ -109,336 +135,41 @@ class UberEatsPanel extends HTMLElement {
     const details = await this._loadAccountDetails(entryId);
     if (details) {
       this._selectedAccount = details;
+      this._currentView = "account-details";
       this._render();
     }
   }
 
-  _render() {
-    const styles = `
-      <style>
-        :host {
-          display: block;
-          height: 100%;
-          background: var(--primary-background-color, #111);
-          color: var(--primary-text-color, #fff);
-          font-family: var(--paper-font-body1_-_font-family, 'Roboto', sans-serif);
-          overflow-y: auto;
-        }
-        
-        .container {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 16px;
-        }
-        
-        .header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 16px 24px;
-          background: linear-gradient(135deg, #06C167 0%, #05a558 100%);
-          border-radius: 12px;
-          margin-bottom: 24px;
-        }
-        
-        .header h1 {
-          margin: 0;
-          font-size: 24px;
-          font-weight: 600;
-          color: white;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        
-        .header-icon {
-          font-size: 32px;
-        }
-        
-        .btn {
-          padding: 10px 20px;
-          border-radius: 8px;
-          border: none;
-          cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
-          transition: all 0.2s ease;
-        }
-        
-        .btn-primary {
-          background: white;
-          color: #06C167;
-        }
-        
-        .btn-primary:hover {
-          background: #f0f0f0;
-          transform: translateY(-1px);
-        }
-        
-        .btn-danger {
-          background: #dc3545;
-          color: white;
-        }
-        
-        .btn-danger:hover {
-          background: #c82333;
-        }
-        
-        .btn-secondary {
-          background: var(--secondary-background-color, #333);
-          color: var(--primary-text-color, #fff);
-        }
-        
-        .btn-secondary:hover {
-          background: var(--primary-color, #03a9f4);
-        }
-        
-        .accounts-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-          gap: 16px;
-          margin-bottom: 24px;
-        }
-        
-        .account-card {
-          background: var(--card-background-color, #1e1e1e);
-          border-radius: 12px;
-          padding: 20px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          border: 2px solid transparent;
-        }
-        
-        .account-card:hover {
-          border-color: #06C167;
-          transform: translateY(-2px);
-        }
-        
-        .account-card.active-order {
-          border-color: #06C167;
-          background: linear-gradient(135deg, rgba(6, 193, 103, 0.1) 0%, var(--card-background-color, #1e1e1e) 100%);
-        }
-        
-        .account-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 16px;
-        }
-        
-        .account-name {
-          font-size: 18px;
-          font-weight: 600;
-          color: var(--primary-text-color, #fff);
-        }
-        
-        .status-badge {
-          padding: 4px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 500;
-          text-transform: uppercase;
-        }
-        
-        .status-active {
-          background: #06C167;
-          color: white;
-        }
-        
-        .status-inactive {
-          background: var(--secondary-background-color, #333);
-          color: var(--secondary-text-color, #888);
-        }
-        
-        .account-details {
-          display: grid;
-          gap: 8px;
-        }
-        
-        .detail-row {
-          display: flex;
-          justify-content: space-between;
-          font-size: 14px;
-        }
-        
-        .detail-label {
-          color: var(--secondary-text-color, #888);
-        }
-        
-        .detail-value {
-          color: var(--primary-text-color, #fff);
-          font-weight: 500;
-        }
-        
-        .order-details-panel {
-          background: var(--card-background-color, #1e1e1e);
-          border-radius: 12px;
-          padding: 24px;
-          margin-bottom: 24px;
-        }
-        
-        .order-details-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 20px;
-          padding-bottom: 16px;
-          border-bottom: 1px solid var(--divider-color, #333);
-        }
-        
-        .order-details-title {
-          font-size: 20px;
-          font-weight: 600;
-        }
-        
-        .order-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 24px;
-        }
-        
-        @media (max-width: 768px) {
-          .order-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-        
-        .order-info {
-          display: grid;
-          gap: 16px;
-        }
-        
-        .info-group {
-          background: var(--primary-background-color, #111);
-          border-radius: 8px;
-          padding: 16px;
-        }
-        
-        .info-group-title {
-          font-size: 12px;
-          text-transform: uppercase;
-          color: var(--secondary-text-color, #888);
-          margin-bottom: 8px;
-        }
-        
-        .info-group-value {
-          font-size: 18px;
-          font-weight: 600;
-          color: var(--primary-text-color, #fff);
-        }
-        
-        .info-group-subtitle {
-          font-size: 14px;
-          color: var(--secondary-text-color, #888);
-          margin-top: 4px;
-        }
-        
-        .map-container {
-          border-radius: 8px;
-          overflow: hidden;
-          height: 300px;
-          background: var(--primary-background-color, #111);
-        }
-        
-        .map-container iframe {
-          width: 100%;
-          height: 100%;
-          border: none;
-        }
-        
-        .map-placeholder {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          color: var(--secondary-text-color, #888);
-          font-size: 14px;
-        }
-        
-        .stage-indicator {
-          display: flex;
-          gap: 8px;
-          margin-top: 16px;
-        }
-        
-        .stage-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background: var(--secondary-background-color, #333);
-        }
-        
-        .stage-dot.active {
-          background: #06C167;
-        }
-        
-        .stage-dot.completed {
-          background: #06C167;
-        }
-        
-        .actions-row {
-          display: flex;
-          gap: 12px;
-          margin-top: 16px;
-        }
-        
-        .no-accounts {
-          text-align: center;
-          padding: 60px 20px;
-          color: var(--secondary-text-color, #888);
-        }
-        
-        .no-accounts h2 {
-          color: var(--primary-text-color, #fff);
-          margin-bottom: 16px;
-        }
-        
-        .eta-highlight {
-          color: #06C167;
-          font-size: 24px;
-        }
-        
-        .back-btn {
-          background: none;
-          border: none;
-          color: var(--primary-text-color, #fff);
-          cursor: pointer;
-          padding: 8px;
-          margin-right: 8px;
-          font-size: 20px;
-        }
-        
-        .driver-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        
-        .driver-avatar {
-          width: 48px;
-          height: 48px;
-          border-radius: 50%;
-          background: #06C167;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 20px;
-          color: white;
-        }
-      </style>
-    `;
+  _goBack() {
+    this._selectedAccount = null;
+    this._currentView = "main";
+    this._render();
+  }
 
+  _getMapUrl(lat, lon, zoom = 15) {
+    if (!lat || !lon) return null;
+    const delta = 0.003;
+    return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lon}`;
+  }
+
+  _render() {
+    const styles = this._getStyles();
     let content = "";
     
-    if (this._selectedAccount) {
-      content = this._renderOrderDetails();
-    } else {
-      content = this._renderAccountsList();
+    switch (this._currentView) {
+      case "instructions":
+        content = this._renderInstructionsPage();
+        break;
+      case "account-details":
+        content = this._renderAccountDetails();
+        break;
+      default:
+        content = this._renderMainPage();
     }
 
     this.shadowRoot.innerHTML = `
       ${styles}
-      <div class="container">
+      <div class="panel-container">
         ${content}
       </div>
     `;
@@ -446,184 +177,1017 @@ class UberEatsPanel extends HTMLElement {
     this._attachEventListeners();
   }
 
-  _renderAccountsList() {
+  _getStyles() {
+    return `
+      <style>
+        :host {
+          display: block;
+          height: 100%;
+          background: #0f0f0f;
+          color: #ffffff;
+          font-family: 'UberMove', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          overflow-y: auto;
+        }
+        
+        * {
+          box-sizing: border-box;
+        }
+        
+        .panel-container {
+          min-height: 100%;
+          padding: 0;
+        }
+        
+        /* Header */
+        .header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 20px 24px;
+          background: #000000;
+          border-bottom: 1px solid #222;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+        
+        .logo-container {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .logo-icon {
+          font-size: 32px;
+        }
+        
+        .logo-text {
+          font-size: 28px;
+          font-weight: 700;
+          letter-spacing: -0.5px;
+        }
+        
+        .logo-eats {
+          color: #06C167;
+        }
+        
+        .uber-eats-logo {
+          height: 28px;
+          width: auto;
+        }
+        
+        /* Buttons */
+        .btn {
+          padding: 12px 24px;
+          border-radius: 500px;
+          border: none;
+          cursor: pointer;
+          font-size: 15px;
+          font-weight: 500;
+          transition: all 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .btn-primary {
+          background: #06C167;
+          color: #000;
+        }
+        
+        .btn-primary:hover {
+          background: #05a858;
+          transform: scale(1.02);
+        }
+        
+        .btn-secondary {
+          background: #222;
+          color: #fff;
+        }
+        
+        .btn-secondary:hover {
+          background: #333;
+        }
+        
+        .btn-outline {
+          background: transparent;
+          border: 2px solid #333;
+          color: #fff;
+        }
+        
+        .btn-outline:hover {
+          border-color: #06C167;
+          color: #06C167;
+        }
+        
+        .btn-danger {
+          background: transparent;
+          border: 2px solid #dc3545;
+          color: #dc3545;
+        }
+        
+        .btn-danger:hover {
+          background: #dc3545;
+          color: #fff;
+        }
+        
+        .btn-icon {
+          padding: 10px;
+          border-radius: 50%;
+          background: #222;
+          border: none;
+          color: #fff;
+          cursor: pointer;
+          font-size: 18px;
+          line-height: 1;
+        }
+        
+        .btn-icon:hover {
+          background: #333;
+        }
+        
+        /* Main Content */
+        .content {
+          padding: 24px;
+          max-width: 1000px;
+          margin: 0 auto;
+        }
+        
+        /* Account Cards - Full Width */
+        .account-list {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        
+        .account-card {
+          background: #1a1a1a;
+          border-radius: 16px;
+          overflow: hidden;
+          transition: all 0.2s ease;
+          border: 2px solid transparent;
+          cursor: pointer;
+        }
+        
+        .account-card:hover {
+          border-color: #06C167;
+          transform: translateY(-2px);
+        }
+        
+        .account-card.has-order {
+          border-color: #06C167;
+        }
+        
+        .card-main {
+          display: grid;
+          grid-template-columns: 1fr 300px;
+          gap: 0;
+        }
+        
+        @media (max-width: 768px) {
+          .card-main {
+            grid-template-columns: 1fr;
+          }
+          .card-map {
+            height: 200px;
+          }
+        }
+        
+        .card-info {
+          padding: 20px 24px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+        }
+        
+        .card-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+        
+        .account-name {
+          font-size: 22px;
+          font-weight: 600;
+          color: #fff;
+        }
+        
+        .status-badge {
+          padding: 6px 14px;
+          border-radius: 500px;
+          font-size: 12px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        .status-active {
+          background: #06C167;
+          color: #000;
+        }
+        
+        .status-inactive {
+          background: #333;
+          color: #888;
+        }
+        
+        .status-error {
+          background: #dc3545;
+          color: #fff;
+        }
+        
+        .card-details {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 12px;
+        }
+        
+        .detail-item {
+          display: flex;
+          flex-direction: column;
+        }
+        
+        .detail-label {
+          font-size: 11px;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 4px;
+        }
+        
+        .detail-value {
+          font-size: 15px;
+          color: #fff;
+          font-weight: 500;
+        }
+        
+        .detail-value.highlight {
+          color: #06C167;
+          font-size: 18px;
+        }
+        
+        .card-map {
+          height: 180px;
+          background: #111;
+          position: relative;
+        }
+        
+        .card-map iframe {
+          width: 100%;
+          height: 100%;
+          border: none;
+          filter: grayscale(100%) invert(100%) contrast(90%);
+        }
+        
+        .map-overlay {
+          position: absolute;
+          bottom: 8px;
+          left: 8px;
+          background: rgba(0,0,0,0.7);
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 11px;
+          color: #06C167;
+        }
+        
+        /* Instructions Page */
+        .instructions-page {
+          padding: 40px 24px;
+          max-width: 700px;
+          margin: 0 auto;
+        }
+        
+        .instructions-header {
+          text-align: center;
+          margin-bottom: 40px;
+        }
+        
+        .instructions-header h1 {
+          font-size: 32px;
+          font-weight: 700;
+          margin: 0 0 12px 0;
+        }
+        
+        .instructions-header p {
+          color: #888;
+          font-size: 16px;
+          margin: 0;
+        }
+        
+        .steps-container {
+          background: #1a1a1a;
+          border-radius: 16px;
+          padding: 32px;
+          margin-bottom: 32px;
+        }
+        
+        .step {
+          display: flex;
+          gap: 20px;
+          margin-bottom: 28px;
+        }
+        
+        .step:last-child {
+          margin-bottom: 0;
+        }
+        
+        .step-number {
+          width: 36px;
+          height: 36px;
+          background: #06C167;
+          color: #000;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 700;
+          font-size: 16px;
+          flex-shrink: 0;
+        }
+        
+        .step-content h3 {
+          margin: 0 0 8px 0;
+          font-size: 17px;
+          font-weight: 600;
+        }
+        
+        .step-content p {
+          margin: 0;
+          color: #888;
+          font-size: 14px;
+          line-height: 1.6;
+        }
+        
+        .step-content code {
+          background: #333;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-family: 'SF Mono', Monaco, monospace;
+          font-size: 13px;
+          color: #06C167;
+        }
+        
+        .cookie-visual {
+          background: #111;
+          border-radius: 8px;
+          padding: 16px;
+          margin-top: 12px;
+          font-family: 'SF Mono', Monaco, monospace;
+          font-size: 12px;
+          color: #666;
+          word-break: break-all;
+          line-height: 1.5;
+        }
+        
+        .cookie-visual .highlight {
+          color: #06C167;
+          background: rgba(6, 193, 103, 0.1);
+          padding: 1px 4px;
+          border-radius: 3px;
+        }
+        
+        .instructions-actions {
+          display: flex;
+          gap: 12px;
+          justify-content: center;
+        }
+        
+        /* Account Details Page */
+        .details-page {
+          padding: 0;
+        }
+        
+        .details-header {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 20px 24px;
+          background: #000;
+          border-bottom: 1px solid #222;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+        
+        .details-header h2 {
+          margin: 0;
+          font-size: 22px;
+          font-weight: 600;
+          flex-grow: 1;
+        }
+        
+        .details-content {
+          padding: 24px;
+          max-width: 1000px;
+          margin: 0 auto;
+        }
+        
+        .details-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+          margin-bottom: 24px;
+        }
+        
+        @media (max-width: 768px) {
+          .details-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        
+        .details-section {
+          background: #1a1a1a;
+          border-radius: 16px;
+          padding: 24px;
+        }
+        
+        .section-title {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #666;
+          margin-bottom: 16px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .section-title::before {
+          content: '';
+          width: 4px;
+          height: 16px;
+          background: #06C167;
+          border-radius: 2px;
+        }
+        
+        .info-grid {
+          display: grid;
+          gap: 16px;
+        }
+        
+        .info-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        
+        .info-label {
+          color: #888;
+          font-size: 14px;
+        }
+        
+        .info-value {
+          color: #fff;
+          font-weight: 500;
+          font-size: 14px;
+          text-align: right;
+        }
+        
+        .info-value.success {
+          color: #06C167;
+        }
+        
+        .info-value.error {
+          color: #dc3545;
+        }
+        
+        .info-value.warning {
+          color: #ffc107;
+        }
+        
+        .big-map {
+          height: 350px;
+          border-radius: 16px;
+          overflow: hidden;
+          background: #111;
+          margin-bottom: 24px;
+        }
+        
+        .big-map iframe {
+          width: 100%;
+          height: 100%;
+          border: none;
+          filter: grayscale(100%) invert(100%) contrast(90%);
+        }
+        
+        .actions-row {
+          display: flex;
+          gap: 12px;
+          justify-content: flex-end;
+        }
+        
+        /* Connection Status */
+        .connection-indicator {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .status-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+        }
+        
+        .status-dot.connected {
+          background: #06C167;
+        }
+        
+        .status-dot.disconnected {
+          background: #dc3545;
+          animation: none;
+        }
+        
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        
+        /* Empty State */
+        .empty-state {
+          text-align: center;
+          padding: 80px 24px;
+        }
+        
+        .empty-icon {
+          font-size: 64px;
+          margin-bottom: 24px;
+        }
+        
+        .empty-state h2 {
+          font-size: 24px;
+          margin: 0 0 12px 0;
+        }
+        
+        .empty-state p {
+          color: #888;
+          margin: 0 0 32px 0;
+          max-width: 400px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+        
+        /* Order Stage Progress */
+        .stage-progress {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          margin-top: 12px;
+        }
+        
+        .stage-bar {
+          flex: 1;
+          height: 4px;
+          background: #333;
+          border-radius: 2px;
+          overflow: hidden;
+        }
+        
+        .stage-bar.active {
+          background: #06C167;
+        }
+        
+        .stage-bar.current {
+          background: linear-gradient(90deg, #06C167 50%, #333 50%);
+          animation: progress-pulse 1s infinite;
+        }
+        
+        @keyframes progress-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+        
+        /* Driver Info */
+        .driver-card {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          background: #111;
+          padding: 16px;
+          border-radius: 12px;
+          margin-bottom: 16px;
+        }
+        
+        .driver-avatar {
+          width: 52px;
+          height: 52px;
+          background: linear-gradient(135deg, #06C167, #04a054);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+        }
+        
+        .driver-details h4 {
+          margin: 0 0 4px 0;
+          font-size: 16px;
+        }
+        
+        .driver-details p {
+          margin: 0;
+          color: #888;
+          font-size: 13px;
+        }
+        
+        .driver-eta {
+          margin-left: auto;
+          text-align: right;
+        }
+        
+        .driver-eta .time {
+          font-size: 24px;
+          font-weight: 700;
+          color: #06C167;
+        }
+        
+        .driver-eta .label {
+          font-size: 11px;
+          color: #888;
+          text-transform: uppercase;
+        }
+      </style>
+    `;
+  }
+
+  _renderMainPage() {
     const accountCards = this._accounts.length > 0
-      ? this._accounts.map(account => this._renderAccountCard(account)).join("")
-      : `
-        <div class="no-accounts">
-          <h2>No Uber Eats Accounts</h2>
-          <p>Add an account to start tracking your orders</p>
-        </div>
-      `;
+      ? this._accounts.map(acc => this._renderAccountCard(acc)).join("")
+      : this._renderEmptyState();
 
     return `
       <div class="header">
-        <h1>
-          <span class="header-icon">🍔</span>
-          Uber Eats Order Tracker
-        </h1>
-        <button class="btn btn-primary" id="add-account-btn">+ Add Account</button>
+        ${UBER_EATS_LOGO_SIMPLE}
+        <button class="btn btn-primary" id="add-account-btn">
+          <span>+</span> Add Account
+        </button>
       </div>
       
-      <div class="accounts-grid">
-        ${accountCards}
+      <div class="content">
+        <div class="account-list">
+          ${accountCards}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderEmptyState() {
+    return `
+      <div class="empty-state">
+        <div class="empty-icon">🍔</div>
+        <h2>No Accounts Connected</h2>
+        <p>Connect your Uber Eats account to start tracking your orders in real-time.</p>
+        <button class="btn btn-primary" id="add-account-empty-btn">Get Started</button>
       </div>
     `;
   }
 
   _renderAccountCard(account) {
     const isActive = account.active;
-    const statusClass = isActive ? "status-active" : "status-inactive";
-    const statusText = isActive ? "Active Order" : "No Order";
-    const cardClass = isActive ? "account-card active-order" : "account-card";
+    const hasError = account.connection_status === "error";
+    const cardClass = isActive ? "account-card has-order" : "account-card";
+    
+    // Get map coordinates - always show map (home location if no order)
+    const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
+    const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
+    const mapUrl = this._getMapUrl(lat, lon);
+    const mapLabel = isActive && account.driver_name !== "No Driver Assigned" 
+      ? "📍 Driver Location" 
+      : "🏠 Home";
 
     return `
       <div class="${cardClass}" data-entry-id="${account.entry_id}">
-        <div class="account-header">
-          <span class="account-name">${account.account_name}</span>
-          <span class="status-badge ${statusClass}">${statusText}</span>
-        </div>
-        
-        <div class="account-details">
-          ${isActive ? `
-            <div class="detail-row">
-              <span class="detail-label">Restaurant</span>
-              <span class="detail-value">${account.restaurant_name}</span>
+        <div class="card-main">
+          <div class="card-info">
+            <div class="card-header">
+              <span class="account-name">${account.account_name}</span>
+              <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
+                ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
+              </span>
             </div>
-            <div class="detail-row">
-              <span class="detail-label">Status</span>
-              <span class="detail-value">${account.order_stage}</span>
+            
+            <div class="card-details">
+              ${isActive ? `
+                <div class="detail-item">
+                  <span class="detail-label">Restaurant</span>
+                  <span class="detail-value">${account.restaurant_name}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Stage</span>
+                  <span class="detail-value">${account.order_stage}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Driver</span>
+                  <span class="detail-value">${account.driver_name}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">ETA</span>
+                  <span class="detail-value highlight">${account.driver_eta}</span>
+                </div>
+              ` : `
+                <div class="detail-item">
+                  <span class="detail-label">Time Zone</span>
+                  <span class="detail-value">${account.time_zone}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Status</span>
+                  <span class="detail-value">Waiting for orders</span>
+                </div>
+              `}
             </div>
-            <div class="detail-row">
-              <span class="detail-label">Driver</span>
-              <span class="detail-value">${account.driver_name}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">ETA</span>
-              <span class="detail-value" style="color: #06C167;">${account.driver_eta}</span>
-            </div>
-          ` : `
-            <div class="detail-row">
-              <span class="detail-label">Time Zone</span>
-              <span class="detail-value">${account.time_zone}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Status</span>
-              <span class="detail-value">Waiting for orders...</span>
-            </div>
-          `}
+          </div>
+          
+          <div class="card-map">
+            ${mapUrl ? `
+              <iframe src="${mapUrl}" title="Location Map"></iframe>
+              <div class="map-overlay">${mapLabel}</div>
+            ` : `
+              <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;">
+                Map unavailable
+              </div>
+            `}
+          </div>
         </div>
       </div>
     `;
   }
 
-  _renderOrderDetails() {
-    const acc = this._selectedAccount;
-    const isActive = acc.active;
-    const trackingActive = acc.tracking_active;
-    
-    const stages = ["preparing", "picked up", "en route", "arriving", "delivered"];
-    const currentStageIndex = stages.indexOf(acc.order_stage?.toLowerCase()) || 0;
-
-    const mapUrl = trackingActive && acc.driver_location?.lat && acc.driver_location?.lon
-      ? `https://www.openstreetmap.org/export/embed.html?bbox=${acc.driver_location.lon - 0.005}%2C${acc.driver_location.lat - 0.005}%2C${acc.driver_location.lon + 0.005}%2C${acc.driver_location.lat + 0.005}&layer=mapnik&marker=${acc.driver_location.lat}%2C${acc.driver_location.lon}`
-      : null;
-
+  _renderInstructionsPage() {
     return `
       <div class="header">
-        <h1>
-          <button class="back-btn" id="back-btn">←</button>
-          ${acc.account_name}
-        </h1>
-        <div>
-          <button class="btn btn-secondary" id="reconfigure-btn" data-entry-id="${acc.entry_id}">Edit</button>
-          <button class="btn btn-danger" id="delete-btn" data-entry-id="${acc.entry_id}">Delete</button>
-        </div>
+        <button class="btn-icon" id="back-btn">←</button>
+        ${UBER_EATS_LOGO_SIMPLE}
+        <div></div>
       </div>
       
-      <div class="order-details-panel">
-        <div class="order-details-header">
-          <span class="order-details-title">
-            ${isActive ? `Order from ${acc.restaurant_name}` : "No Active Order"}
-          </span>
-          <span class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
-            ${isActive ? acc.order_stage : "Waiting"}
-          </span>
+      <div class="instructions-page">
+        <div class="instructions-header">
+          <h1>Add Uber Eats Account</h1>
+          <p>Follow these steps to connect your Uber Eats account</p>
         </div>
         
-        ${isActive ? `
-          <div class="stage-indicator">
-            ${stages.map((stage, i) => `
-              <div class="stage-dot ${i <= currentStageIndex ? 'completed' : ''}"></div>
-            `).join("")}
+        <div class="steps-container">
+          <div class="step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h3>Open Uber Eats in your browser</h3>
+              <p>Go to <code>www.ubereats.com</code> and make sure you're logged in to your account.</p>
+            </div>
           </div>
           
-          <div class="order-grid" style="margin-top: 24px;">
-            <div class="order-info">
-              <div class="info-group">
-                <div class="info-group-title">Restaurant</div>
-                <div class="info-group-value">${acc.restaurant_name}</div>
-                <div class="info-group-subtitle">Order #${acc.order_id?.substring(0, 8) || "N/A"}</div>
+          <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h3>Open Developer Tools</h3>
+              <p>Press <code>F12</code> on your keyboard (or right-click anywhere and select "Inspect"). This opens the browser's developer tools.</p>
+            </div>
+          </div>
+          
+          <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h3>Go to the Network tab</h3>
+              <p>Click on the <code>Network</code> tab at the top of the developer tools panel.</p>
+            </div>
+          </div>
+          
+          <div class="step">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <h3>Refresh the page</h3>
+              <p>Press <code>F5</code> or click the refresh button. You'll see network requests appear in the list.</p>
+            </div>
+          </div>
+          
+          <div class="step">
+            <div class="step-number">5</div>
+            <div class="step-content">
+              <h3>Find and copy the Cookie</h3>
+              <p>Click on any request in the list (like <code>getActiveOrdersV1</code>). In the "Headers" tab on the right, scroll down to "Request Headers" and find <code>Cookie</code>. Copy the <strong>entire</strong> value.</p>
+              <div class="cookie-visual">
+                <span class="highlight">sid=QA.CAES...</span>; dId=358b9db7...; 
+                <span class="highlight">uev2.id.session=8e031537...</span>; jwt-session=eyJhb...
+              </div>
+            </div>
+          </div>
+          
+          <div class="step">
+            <div class="step-number">6</div>
+            <div class="step-content">
+              <h3>Enter your account details</h3>
+              <p>Click "Continue" below to open the configuration form. Paste your cookie string and give your account a nickname (e.g., "Personal" or "Work").</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="instructions-actions">
+          <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
+          <button class="btn btn-primary" id="continue-btn">Continue to Setup →</button>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderAccountDetails() {
+    const acc = this._selectedAccount;
+    if (!acc) return "";
+
+    const isActive = acc.active;
+    const trackingActive = acc.tracking_active;
+    const driverAssigned = acc.driver_assigned;
+    
+    // Get map coordinates
+    const lat = acc.driver_location?.lat || acc.home_location?.lat || 0;
+    const lon = acc.driver_location?.lon || acc.home_location?.lon || 0;
+    const mapUrl = this._getMapUrl(lat, lon, 16);
+    
+    // Stage progress
+    const stages = ["preparing", "picked up", "en route", "arriving"];
+    const currentStage = (acc.order_stage || "").toLowerCase();
+    const currentStageIndex = stages.findIndex(s => currentStage.includes(s));
+
+    // Connection status
+    const isConnected = acc.connection_status !== "error";
+
+    return `
+      <div class="details-page">
+        <div class="details-header">
+          <button class="btn-icon" id="back-btn">←</button>
+          <h2>${acc.account_name}</h2>
+          <div class="connection-indicator">
+            <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
+            <span style="font-size:13px;color:${isConnected ? '#06C167' : '#dc3545'}">
+              ${isConnected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+        </div>
+        
+        <div class="details-content">
+          <!-- Map Always Visible -->
+          <div class="big-map">
+            ${mapUrl ? `
+              <iframe src="${mapUrl}" title="Location Map"></iframe>
+            ` : `
+              <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;">
+                Map unavailable
+              </div>
+            `}
+          </div>
+          
+          ${isActive && driverAssigned ? `
+            <div class="driver-card">
+              <div class="driver-avatar">🚗</div>
+              <div class="driver-details">
+                <h4>${acc.driver_name}</h4>
+                <p>${acc.driver_location?.street || "On the way"}</p>
+              </div>
+              <div class="driver-eta">
+                <div class="time">${acc.minutes_remaining || "—"} min</div>
+                <div class="label">Estimated</div>
+              </div>
+            </div>
+          ` : ""}
+          
+          <div class="details-grid">
+            <!-- Order Information -->
+            <div class="details-section">
+              <div class="section-title">Order Information</div>
+              <div class="info-grid">
+                <div class="info-row">
+                  <span class="info-label">Status</span>
+                  <span class="info-value ${isActive ? 'success' : ''}">${isActive ? "Active Order" : "No Active Order"}</span>
+                </div>
+                ${isActive ? `
+                  <div class="info-row">
+                    <span class="info-label">Restaurant</span>
+                    <span class="info-value">${acc.restaurant_name}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Order Stage</span>
+                    <span class="info-value">${acc.order_stage}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Order Status</span>
+                    <span class="info-value">${acc.order_status}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Driver</span>
+                    <span class="info-value">${acc.driver_name}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">ETA</span>
+                    <span class="info-value success">${acc.driver_eta}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Latest Arrival</span>
+                    <span class="info-value">${acc.latest_arrival}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Order ID</span>
+                    <span class="info-value" style="font-family:monospace;font-size:12px;">${acc.order_id?.substring(0, 16) || "N/A"}...</span>
+                  </div>
+                ` : `
+                  <div class="info-row">
+                    <span class="info-label">Time Zone</span>
+                    <span class="info-value">${acc.time_zone}</span>
+                  </div>
+                `}
               </div>
               
-              ${acc.driver_assigned ? `
-                <div class="info-group">
-                  <div class="info-group-title">Driver</div>
-                  <div class="driver-info">
-                    <div class="driver-avatar">🚗</div>
-                    <div>
-                      <div class="info-group-value">${acc.driver_name}</div>
-                      <div class="info-group-subtitle">${acc.driver_location?.street || "En route"}</div>
+              ${isActive ? `
+                <div class="stage-progress">
+                  ${stages.map((stage, i) => {
+                    const isCompleted = i < currentStageIndex;
+                    const isCurrent = i === currentStageIndex;
+                    return `<div class="stage-bar ${isCompleted ? 'active' : ''} ${isCurrent ? 'current' : ''}"></div>`;
+                  }).join("")}
+                </div>
+              ` : ""}
+            </div>
+            
+            <!-- Account & Connection Info -->
+            <div class="details-section">
+              <div class="section-title">Account Details</div>
+              <div class="info-grid">
+                <div class="info-row">
+                  <span class="info-label">Account Name</span>
+                  <span class="info-value">${acc.account_name}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Time Zone</span>
+                  <span class="info-value">${acc.time_zone}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">API Connection</span>
+                  <span class="info-value ${isConnected ? 'success' : 'error'}">${isConnected ? 'Connected' : 'Error'}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Entry ID</span>
+                  <span class="info-value" style="font-family:monospace;font-size:11px;">${acc.entry_id?.substring(0, 12)}...</span>
+                </div>
+              </div>
+              
+              ${isActive && acc.driver_location ? `
+                <div style="margin-top:20px;">
+                  <div class="section-title">Driver Location</div>
+                  <div class="info-grid">
+                    <div class="info-row">
+                      <span class="info-label">Street</span>
+                      <span class="info-value">${acc.driver_location.street || "Unknown"}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">Suburb</span>
+                      <span class="info-value">${acc.driver_location.suburb || "Unknown"}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">Coordinates</span>
+                      <span class="info-value" style="font-family:monospace;font-size:12px;">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>
                     </div>
                   </div>
                 </div>
-              ` : `
-                <div class="info-group">
-                  <div class="info-group-title">Driver</div>
-                  <div class="info-group-value">Waiting for driver...</div>
-                </div>
-              `}
-              
-              <div class="info-group">
-                <div class="info-group-title">Estimated Arrival</div>
-                <div class="info-group-value eta-highlight">${acc.driver_eta}</div>
-                ${acc.minutes_remaining ? `
-                  <div class="info-group-subtitle">${acc.minutes_remaining} minutes remaining</div>
-                ` : ""}
-              </div>
-              
-              <div class="info-group">
-                <div class="info-group-title">Status</div>
-                <div class="info-group-value">${acc.order_status}</div>
-                <div class="info-group-subtitle">${acc.latest_arrival}</div>
-              </div>
-            </div>
-            
-            <div class="map-container">
-              ${mapUrl ? `
-                <iframe src="${mapUrl}" title="Driver Location"></iframe>
-              ` : `
-                <div class="map-placeholder">
-                  ${acc.driver_assigned ? "Loading map..." : "Map will appear when driver is assigned"}
-                </div>
-              `}
+              ` : ""}
             </div>
           </div>
-        ` : `
-          <div class="no-accounts" style="padding: 40px 0;">
-            <p>No active orders for this account.</p>
-            <p style="font-size: 14px; margin-top: 8px;">Orders will appear here when you place one on Uber Eats.</p>
+          
+          <div class="actions-row">
+            <button class="btn btn-outline" id="reconfigure-btn" data-entry-id="${acc.entry_id}">Edit Account</button>
+            <button class="btn btn-danger" id="delete-btn" data-entry-id="${acc.entry_id}">Delete Account</button>
           </div>
-        `}
+        </div>
       </div>
     `;
   }
 
   _attachEventListeners() {
-    // Add account button
+    // Add account buttons
     const addBtn = this.shadowRoot.querySelector("#add-account-btn");
+    const addBtnEmpty = this.shadowRoot.querySelector("#add-account-empty-btn");
+    
     if (addBtn) {
-      addBtn.addEventListener("click", () => this._addAccount());
+      addBtn.addEventListener("click", () => this._showInstructions());
+    }
+    if (addBtnEmpty) {
+      addBtnEmpty.addEventListener("click", () => this._showInstructions());
+    }
+
+    // Continue button (instructions page)
+    const continueBtn = this.shadowRoot.querySelector("#continue-btn");
+    if (continueBtn) {
+      continueBtn.addEventListener("click", () => this._continueToAddAccount());
+    }
+
+    // Cancel button
+    const cancelBtn = this.shadowRoot.querySelector("#cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => this._goBack());
+    }
+
+    // Back button
+    const backBtn = this.shadowRoot.querySelector("#back-btn");
+    if (backBtn) {
+      backBtn.addEventListener("click", () => this._goBack());
     }
 
     // Account cards
@@ -635,19 +1199,11 @@ class UberEatsPanel extends HTMLElement {
       });
     });
 
-    // Back button
-    const backBtn = this.shadowRoot.querySelector("#back-btn");
-    if (backBtn) {
-      backBtn.addEventListener("click", () => {
-        this._selectedAccount = null;
-        this._render();
-      });
-    }
-
     // Reconfigure button
     const reconfigureBtn = this.shadowRoot.querySelector("#reconfigure-btn");
     if (reconfigureBtn) {
-      reconfigureBtn.addEventListener("click", () => {
+      reconfigureBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
         const entryId = reconfigureBtn.dataset.entryId;
         this._reconfigureAccount(entryId);
       });
@@ -656,7 +1212,8 @@ class UberEatsPanel extends HTMLElement {
     // Delete button
     const deleteBtn = this.shadowRoot.querySelector("#delete-btn");
     if (deleteBtn) {
-      deleteBtn.addEventListener("click", () => {
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
         const entryId = deleteBtn.dataset.entryId;
         this._deleteAccount(entryId);
       });
