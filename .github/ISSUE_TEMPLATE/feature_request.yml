@@ -1,0 +1,83 @@
+name: ✨ Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Feature Request 💡
+        Thanks for taking the time to suggest an improvement!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is this related to a problem?
+      description: A clear description of the problem you're trying to solve.
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe your proposed solution
+      description: A clear description of what you want to happen.
+      placeholder: Describe your idea...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      description: What part of the integration does this relate to?
+      options:
+        - Sidebar Panel
+        - Sensors/Entities
+        - Device Tracker / Map
+        - Notifications
+        - Configuration
+        - Automations
+        - New Functionality
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: Describe alternatives...
+    validations:
+      required: false
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: How would this feature benefit you or other users?
+      placeholder: Explain your use case...
+    validations:
+      required: true
+
+  - type: textarea
+    id: mockups
+    attributes:
+      label: Mockups / Examples
+      description: If applicable, add mockups, screenshots, or examples of similar features.
+      placeholder: Drag and drop images here...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to ensure this hasn't been requested
+          required: true
+        - label: I would be willing to help test this feature
+          required: false
