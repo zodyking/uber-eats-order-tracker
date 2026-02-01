@@ -16,6 +16,7 @@ from .const import (
     CONF_ACCOUNT_NAME,
     CONF_TIME_ZONE,
     ENDPOINT,
+    ENDPOINT_PAST_ORDERS,
     HEADERS_TEMPLATE,
 )
 
@@ -113,7 +114,7 @@ def _validate_cookie_string(cookie_string: str) -> tuple[str | None, dict[str, s
 
 
 async def _validate_credentials(hass, sid: str, session_id: str, time_zone: str) -> bool:
-    """Validate credentials by making a test API call. Returns True if valid."""
+    """Validate credentials by making test API calls to both endpoints. Returns True if valid."""
     def _get_locale_code(tz: str) -> str:
         if tz.startswith("America/"):
             return "us"
@@ -124,16 +125,34 @@ async def _validate_credentials(hass, sid: str, session_id: str, time_zone: str)
     try:
         async with aiohttp.ClientSession() as session:
             locale_code = _get_locale_code(time_zone)
-            url = f"{ENDPOINT}?localeCode={locale_code}"
             headers = HEADERS_TEMPLATE.copy()
             headers["Cookie"] = f"sid={sid}; uev2.id.session={session_id}"
-            payload = {"orderUuid": None, "timezone": time_zone, "showAppUpsellIllustration": True}
             
-            async with session.post(url, json=payload, headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return "data" in data
-                return False
+            # Test 1: getActiveOrdersV1
+            url_active = f"{ENDPOINT}?localeCode={locale_code}"
+            payload_active = {"orderUuid": None, "timezone": time_zone, "showAppUpsellIllustration": True}
+            
+            async with session.post(url_active, json=payload_active, headers=headers) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("getActiveOrdersV1 returned status %s", resp.status)
+                    return False
+                data = await resp.json()
+                if "data" not in data:
+                    return False
+            
+            # Test 2: getPastOrdersV1
+            url_past = f"{ENDPOINT_PAST_ORDERS}?localeCode={locale_code}"
+            payload_past = {"lastWorkflowUUID": ""}
+            
+            async with session.post(url_past, json=payload_past, headers=headers) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("getPastOrdersV1 returned status %s", resp.status)
+                    return False
+                data = await resp.json()
+                if "data" not in data:
+                    return False
+            
+            return True
     except Exception as e:
         _LOGGER.debug("Credential validation error: %s", e)
         return False

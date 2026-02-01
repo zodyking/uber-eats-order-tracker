@@ -9,7 +9,7 @@ from .const import DOMAIN, CONF_SID, CONF_SESSION_ID, CONF_ACCOUNT_NAME, CONF_TI
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "device_tracker"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
