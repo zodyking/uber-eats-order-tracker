@@ -4,6 +4,21 @@ All notable changes to this project will be documented here.
 
 ---
 
+## Version 1.2.3
+
+**Released:** February 1, 2026
+
+### Changed
+
+- **Panel – Account details page (ORDER INFORMATION):** Order Status now uses the same conditional logic as the dashboard card: "Preparing order" when active but no driver; "Arriving" when driver is within 1000 ft of address; "Arrived" when within 300 ft; otherwise shows the order stage from the integration.
+- **Panel – Account details page driver/location:** When no driver is assigned, Driver shows "Not assigned" and Driver Location (Street, Suburb, Coordinates) shows "None yet" / "—" (UI only; sensor values unchanged).
+
+### Added
+
+- **Panel – Account details page ETT:** The Order Information card on the account details page now includes an ETT (estimated time in minutes) field, in addition to the existing ETA field.
+
+---
+
 ## Version 1.2.2
 
 **Released:** February 1, 2026

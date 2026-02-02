@@ -159,6 +159,50 @@ class UberEatsPanel extends HTMLElement {
     return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lon}`;
   }
 
+  /** Distance in feet between two lat/lon points (Haversine). */
+  _distanceFeet(lat1, lon1, lat2, lon2) {
+    if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+    const R = 6371000; // Earth radius in meters
+    const toRad = (x) => (x * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const meters = R * c;
+    return meters * 3.28084; // meters to feet
+  }
+
+  /** Display order status: preparing when no driver; arriving/arrived by distance; else sensor order_stage. */
+  _displayOrderStatus(account) {
+    if (!account.active) return "No Active Order";
+    const noDriver =
+      !account.driver_name ||
+      account.driver_name === "No Driver Assigned" ||
+      account.driver_name === "Unknown";
+    if (noDriver) return "Preparing order";
+    const homeLat = this._hass?.config?.latitude;
+    const homeLon = this._hass?.config?.longitude;
+    const driverLat = account.driver_location?.lat;
+    const driverLon = account.driver_location?.lon;
+    const distFeet = this._distanceFeet(driverLat, driverLon, homeLat, homeLon);
+    if (distFeet != null) {
+      if (distFeet <= 300) return "Arrived";
+      if (distFeet <= 1000) return "Arriving";
+    }
+    const stage = (account.order_stage || "").toLowerCase();
+    const labels = {
+      preparing: "Preparing",
+      "picked up": "Picked up",
+      "en route": "En route",
+      arriving: "Arriving",
+      delivered: "Delivered",
+      complete: "Complete",
+    };
+    return labels[stage] || (account.order_stage ? String(account.order_stage) : "—");
+  }
+
   _render() {
     const styles = this._getStyles();
     let content = "";
@@ -890,17 +934,34 @@ class UberEatsPanel extends HTMLElement {
     const isActive = account.active;
     const hasError = account.connection_status === "error";
     const cardClass = isActive ? "account-card has-order" : "account-card";
-    
+    const noDriver =
+      !account.driver_name ||
+      account.driver_name === "No Driver Assigned" ||
+      account.driver_name === "Unknown";
+
     // Get map coordinates - always show map (home location if no order)
     const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
     const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
     const mapUrl = this._getMapUrl(lat, lon);
-    const mapLabel = isActive && account.driver_name !== "No Driver Assigned" 
-      ? "📍 Driver Location" 
-      : "🏠 Home";
-    
-    // Get driver location street for display
-    const driverStreet = account.driver_location?.street || "Unknown";
+    const mapLabel = isActive && !noDriver ? "📍 Driver Location" : "🏠 Home";
+
+    const orderStatusDisplay = this._displayOrderStatus(account);
+    const driverDisplay = noDriver ? "Not assigned" : account.driver_name;
+    const driverStreet = account.driver_location?.street;
+    const locationDisplay = noDriver
+      ? "None yet"
+      : driverStreet && driverStreet !== "Unknown" && driverStreet !== "Home"
+        ? driverStreet
+        : "None yet";
+
+    const etaDisplay =
+      account.driver_eta && account.driver_eta !== "No ETA" && account.driver_eta !== "No ETA Available"
+        ? account.driver_eta
+        : "—";
+    const ettDisplay =
+      account.minutes_remaining != null && account.minutes_remaining !== ""
+        ? `${account.minutes_remaining} min`
+        : "—";
 
     return `
       <div class="${cardClass}" data-entry-id="${account.entry_id}">
@@ -917,7 +978,7 @@ class UberEatsPanel extends HTMLElement {
               ${isActive ? `
                 <div class="detail-item">
                   <span class="detail-label">Order Status</span>
-                  <span class="detail-value">${account.order_status}</span>
+                  <span class="detail-value">${orderStatusDisplay}</span>
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Restaurant</span>
@@ -925,11 +986,19 @@ class UberEatsPanel extends HTMLElement {
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Driver</span>
-                  <span class="detail-value">${account.driver_name}</span>
+                  <span class="detail-value">${driverDisplay}</span>
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Location</span>
-                  <span class="detail-value">${driverStreet !== "Unknown" && driverStreet !== "Home" ? driverStreet : "Awaiting driver"}</span>
+                  <span class="detail-value">${locationDisplay}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">ETA</span>
+                  <span class="detail-value">${etaDisplay}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">ETT</span>
+                  <span class="detail-value">${ettDisplay}</span>
                 </div>
               ` : `
                 <div class="detail-item" style="grid-column: span 2;">
@@ -1041,7 +1110,24 @@ class UberEatsPanel extends HTMLElement {
     const isActive = acc.active;
     const trackingActive = acc.tracking_active;
     const driverAssigned = acc.driver_assigned;
-    
+    const noDriver =
+      !acc.driver_name ||
+      acc.driver_name === "No Driver Assigned" ||
+      acc.driver_name === "Unknown";
+
+    const orderStatusDisplay = this._displayOrderStatus(acc);
+    const driverDisplay = noDriver ? "Not assigned" : acc.driver_name;
+    const locationStreet = noDriver ? "None yet" : (acc.driver_location?.street || "—");
+    const locationSuburb = noDriver ? "—" : (acc.driver_location?.suburb || "—");
+    const etaDisplay =
+      acc.driver_eta && acc.driver_eta !== "No ETA" && acc.driver_eta !== "No ETA Available"
+        ? acc.driver_eta
+        : "—";
+    const ettDisplay =
+      acc.minutes_remaining != null && acc.minutes_remaining !== ""
+        ? `${acc.minutes_remaining} min`
+        : "—";
+
     // Get map coordinates
     const lat = acc.driver_location?.lat || acc.home_location?.lat || 0;
     const lon = acc.driver_location?.lon || acc.home_location?.lon || 0;
@@ -1117,15 +1203,19 @@ class UberEatsPanel extends HTMLElement {
                   </div>
                   <div class="info-row">
                     <span class="info-label">Order Status</span>
-                    <span class="info-value">${acc.order_status}</span>
+                    <span class="info-value">${orderStatusDisplay}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Driver</span>
-                    <span class="info-value">${acc.driver_name}</span>
+                    <span class="info-value">${driverDisplay}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">ETA</span>
-                    <span class="info-value success">${acc.driver_eta}</span>
+                    <span class="info-value success">${etaDisplay}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">ETT</span>
+                    <span class="info-value">${ettDisplay}</span>
                   </div>
                   <div class="info-row">
                     <span class="info-label">Latest Arrival</span>
@@ -1171,21 +1261,21 @@ class UberEatsPanel extends HTMLElement {
                 </div>
               </div>
               
-              ${isActive && acc.driver_location ? `
+              ${isActive ? `
                 <div style="margin-top:20px;">
                   <div class="section-title">Driver Location</div>
                   <div class="info-grid">
                     <div class="info-row">
                       <span class="info-label">Street</span>
-                      <span class="info-value">${acc.driver_location.street || "Unknown"}</span>
+                      <span class="info-value">${locationStreet}</span>
                     </div>
                     <div class="info-row">
                       <span class="info-label">Suburb</span>
-                      <span class="info-value">${acc.driver_location.suburb || "Unknown"}</span>
+                      <span class="info-value">${locationSuburb}</span>
                     </div>
                     <div class="info-row">
                       <span class="info-label">Coordinates</span>
-                      <span class="info-value" style="font-family:monospace;font-size:12px;">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>
+                      <span class="info-value" style="font-family:monospace;font-size:12px;">${noDriver ? "—" : `${lat.toFixed(5)}, ${lon.toFixed(5)}`}</span>
                     </div>
                   </div>
                 </div>
