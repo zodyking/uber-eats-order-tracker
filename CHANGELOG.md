@@ -4,6 +4,16 @@ All notable changes to this project will be documented here.
 
 ---
 
+## Version 1.2.4
+
+**Released:** February 9, 2026
+
+### Added
+
+- TTS announcement support (see blueprint).
+
+---
+
 ## Version 1.2.3
 
 **Released:** February 1, 2026
