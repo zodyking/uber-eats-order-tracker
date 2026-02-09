@@ -10,7 +10,16 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntryState
 
-from .const import DOMAIN, CONF_ACCOUNT_NAME, CONF_TIME_ZONE
+from .const import (
+    DOMAIN,
+    CONF_ACCOUNT_NAME,
+    CONF_TIME_ZONE,
+    CONF_TTS_ENABLED,
+    CONF_TTS_ENTITY_ID,
+    CONF_TTS_MEDIA_PLAYERS,
+    CONF_TTS_MESSAGE_PREFIX,
+    DEFAULT_TTS_MESSAGE_PREFIX,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +30,9 @@ def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_accounts)
     websocket_api.async_register_command(hass, websocket_get_account_data)
     websocket_api.async_register_command(hass, websocket_delete_account)
+    websocket_api.async_register_command(hass, websocket_get_tts_entities)
+    websocket_api.async_register_command(hass, websocket_get_tts_settings)
+    websocket_api.async_register_command(hass, websocket_update_tts_settings)
 
 
 @websocket_api.websocket_command(
@@ -292,3 +304,97 @@ async def websocket_delete_account(
     except Exception as e:
         _LOGGER.error("Failed to delete account: %s", e)
         connection.send_error(msg["id"], "delete_failed", str(e))
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "uber_eats/get_tts_entities",
+    }
+)
+@websocket_api.async_response
+async def websocket_get_tts_entities(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get TTS and media player entities for dropdowns."""
+    tts_entities = []
+    media_player_entities = []
+
+    for state in hass.states.async_all():
+        entity_id = state.entity_id
+        if entity_id.startswith("tts."):
+            tts_entities.append({"entity_id": entity_id, "name": state.name or entity_id})
+        elif entity_id.startswith("media_player."):
+            media_player_entities.append({"entity_id": entity_id, "name": state.name or entity_id})
+
+    tts_entities.sort(key=lambda x: x["entity_id"])
+    media_player_entities.sort(key=lambda x: x["entity_id"])
+
+    connection.send_result(msg["id"], {
+        "tts_entities": tts_entities,
+        "media_player_entities": media_player_entities,
+    })
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "uber_eats/get_tts_settings",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_get_tts_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get TTS settings for an account."""
+    entry_id = msg["entry_id"]
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if not entry:
+        connection.send_error(msg["id"], "not_found", "Config entry not found")
+        return
+
+    options = entry.options or {}
+    connection.send_result(msg["id"], {
+        "tts_enabled": options.get(CONF_TTS_ENABLED, False),
+        "tts_entity_id": options.get(CONF_TTS_ENTITY_ID, ""),
+        "tts_media_players": options.get(CONF_TTS_MEDIA_PLAYERS, []),
+        "tts_message_prefix": options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX),
+    })
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "uber_eats/update_tts_settings",
+        vol.Required("entry_id"): str,
+        vol.Required("tts_enabled"): bool,
+        vol.Required("tts_entity_id"): str,
+        vol.Required("tts_media_players"): list,
+        vol.Required("tts_message_prefix"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_update_tts_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Update TTS settings for an account."""
+    entry_id = msg["entry_id"]
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if not entry:
+        connection.send_error(msg["id"], "not_found", "Config entry not found")
+        return
+
+    options = dict(entry.options or {})
+    options[CONF_TTS_ENABLED] = msg["tts_enabled"]
+    options[CONF_TTS_ENTITY_ID] = (msg["tts_entity_id"] or "").strip()
+    options[CONF_TTS_MEDIA_PLAYERS] = [
+        e for e in msg["tts_media_players"] if isinstance(e, str) and e.startswith("media_player.")
+    ]
+    options[CONF_TTS_MESSAGE_PREFIX] = (msg["tts_message_prefix"] or "").strip() or DEFAULT_TTS_MESSAGE_PREFIX
+
+    hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"], {"success": True})

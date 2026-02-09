@@ -45,10 +45,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         coordinator = UberEatsCoordinator(
             hass,
+            entry.entry_id,
             entry.data[CONF_SID],
             entry.data[CONF_SESSION_ID],
             entry.data[CONF_ACCOUNT_NAME],
-            entry.data[CONF_TIME_ZONE]
+            entry.data[CONF_TIME_ZONE],
         )
         # Use async_config_entry_first_refresh to properly handle auth errors
         await coordinator.async_config_entry_first_refresh()

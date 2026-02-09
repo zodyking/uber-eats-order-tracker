@@ -31,6 +31,8 @@ class UberEatsPanel extends HTMLElement {
     this._selectedAccount = null;
     this._currentView = "main"; // main, instructions, account-details
     this._refreshInterval = null;
+    this._ttsEntities = { tts_entities: [], media_player_entities: [] };
+    this._ttsSettings = null;
   }
 
   set hass(hass) {
@@ -143,7 +145,58 @@ class UberEatsPanel extends HTMLElement {
     if (details) {
       this._selectedAccount = details;
       this._currentView = "account-details";
+      await Promise.all([
+        this._loadTtsSettings(entryId),
+        this._loadTtsEntities(),
+      ]);
       this._render();
+    }
+  }
+
+  async _loadTtsEntities() {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({ type: "uber_eats/get_tts_entities" });
+      this._ttsEntities = result;
+    } catch (e) {
+      console.error("Failed to load TTS entities:", e);
+    }
+  }
+
+  async _loadTtsSettings(entryId) {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({
+        type: "uber_eats/get_tts_settings",
+        entry_id: entryId,
+      });
+      this._ttsSettings = result;
+    } catch (e) {
+      console.error("Failed to load TTS settings:", e);
+      this._ttsSettings = {
+        tts_enabled: false,
+        tts_entity_id: "",
+        tts_media_players: [],
+        tts_message_prefix: "Message from Uber Eats",
+      };
+    }
+  }
+
+  async _saveTtsSettings(entryId, settings) {
+    if (!this._hass) return;
+    try {
+      await this._hass.callWS({
+        type: "uber_eats/update_tts_settings",
+        entry_id: entryId,
+        tts_enabled: settings.tts_enabled,
+        tts_entity_id: settings.tts_entity_id,
+        tts_media_players: settings.tts_media_players,
+        tts_message_prefix: settings.tts_message_prefix || "Message from Uber Eats",
+      });
+      this._ttsSettings = settings;
+    } catch (e) {
+      console.error("Failed to save TTS settings:", e);
+      alert("Failed to save TTS settings: " + (e.message || e));
     }
   }
 
@@ -891,6 +944,87 @@ class UberEatsPanel extends HTMLElement {
           color: #888;
           text-transform: uppercase;
         }
+        
+        /* TTS Notification Settings */
+        .tts-section {
+          background: #1a1a1a;
+          border-radius: 16px;
+          padding: 24px;
+          margin-bottom: 24px;
+        }
+        .tts-toggle-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 20px;
+        }
+        .tts-toggle-row label {
+          font-size: 15px;
+          font-weight: 500;
+        }
+        .tts-toggle {
+          position: relative;
+          width: 48px;
+          height: 26px;
+          background: #333;
+          border-radius: 13px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .tts-toggle.enabled {
+          background: #06C167;
+        }
+        .tts-toggle.disabled {
+          cursor: not-allowed;
+        }
+        .tts-toggle-knob {
+          position: absolute;
+          top: 3px;
+          left: 3px;
+          width: 20px;
+          height: 20px;
+          background: #fff;
+          border-radius: 50%;
+          transition: transform 0.2s;
+        }
+        .tts-toggle.enabled .tts-toggle-knob {
+          transform: translateX(22px);
+        }
+        .tts-fields {
+          display: grid;
+          gap: 16px;
+        }
+        .tts-field.disabled {
+          opacity: 0.5;
+          pointer-events: none;
+        }
+        .tts-field label {
+          display: block;
+          font-size: 12px;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 8px;
+        }
+        .tts-field select,
+        .tts-field input {
+          width: 100%;
+          padding: 12px 16px;
+          background: #111;
+          border: 2px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+        }
+        .tts-field select:focus,
+        .tts-field input:focus {
+          outline: none;
+          border-color: #06C167;
+        }
+        .tts-multi-select {
+          min-height: 80px;
+          max-height: 120px;
+        }
       </style>
     `;
   }
@@ -1283,9 +1417,62 @@ class UberEatsPanel extends HTMLElement {
             </div>
           </div>
           
+          ${this._renderTtsSection(acc)}
+          
           <div class="actions-row">
             <button class="btn btn-outline" id="reconfigure-btn" data-entry-id="${acc.entry_id}">Edit Account</button>
             <button class="btn btn-danger" id="delete-btn" data-entry-id="${acc.entry_id}">Delete Account</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderTtsSection(acc) {
+    const settings = this._ttsSettings || {
+      tts_enabled: false,
+      tts_entity_id: "",
+      tts_media_players: [],
+      tts_message_prefix: "Message from Uber Eats",
+    };
+    const enabled = !!settings.tts_enabled;
+    const ttsList = this._ttsEntities?.tts_entities || [];
+    const mediaList = this._ttsEntities?.media_player_entities || [];
+    const selectedMedia = Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [];
+    const prefix = settings.tts_message_prefix || "Message from Uber Eats";
+
+    const ttsOptions = ttsList.map((e) =>
+      `<option value="${e.entity_id}" ${e.entity_id === settings.tts_entity_id ? "selected" : ""}>${e.name || e.entity_id}</option>`
+    ).join("");
+
+    const mediaOptions = mediaList.map((e) =>
+      `<option value="${e.entity_id}" ${selectedMedia.includes(e.entity_id) ? "selected" : ""}>${e.name || e.entity_id}</option>`
+    ).join("");
+
+    return `
+      <div class="tts-section">
+        <div class="section-title">TTS Notification Settings</div>
+        <div class="tts-toggle-row">
+          <label>Enable TTS notifications</label>
+          <div class="tts-toggle ${enabled ? "enabled" : ""}" id="tts-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${enabled}"><span class="tts-toggle-knob"></span></div>
+        </div>
+        <div class="tts-fields">
+          <div class="tts-field ${enabled ? "" : "disabled"}">
+            <label>TTS Engine</label>
+            <select id="tts-entity-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
+              <option value="">Select TTS engine...</option>
+              ${ttsOptions}
+            </select>
+          </div>
+          <div class="tts-field ${enabled ? "" : "disabled"}">
+            <label>Media Players (hold Ctrl/Cmd to select multiple)</label>
+            <select id="tts-media-select" class="tts-multi-select" multiple data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
+              ${mediaOptions}
+            </select>
+          </div>
+          <div class="tts-field ${enabled ? "" : "disabled"}">
+            <label>Message Prefix</label>
+            <input type="text" id="tts-prefix-input" value="${prefix.replace(/"/g, "&quot;")}" placeholder="Message from Uber Eats" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
           </div>
         </div>
       </div>
@@ -1361,6 +1548,67 @@ class UberEatsPanel extends HTMLElement {
         e.stopPropagation();
         const entryId = deleteBtn.dataset.entryId;
         this._deleteAccount(entryId);
+      });
+    }
+
+    // TTS toggle
+    const ttsToggle = this.shadowRoot.querySelector("#tts-toggle");
+    if (ttsToggle) {
+      const entryId = ttsToggle.dataset.entryId;
+      const toggleHandler = () => {
+        const nextEnabled = !this._ttsSettings?.tts_enabled;
+        const settings = {
+          tts_enabled: nextEnabled,
+          tts_entity_id: this._ttsSettings?.tts_entity_id || "",
+          tts_media_players: this._ttsSettings?.tts_media_players || [],
+          tts_message_prefix: this._ttsSettings?.tts_message_prefix || "Message from Uber Eats",
+        };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      ttsToggle.addEventListener("click", toggleHandler);
+      ttsToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleHandler();
+        }
+      });
+    }
+
+    // TTS entity select
+    const ttsEntitySelect = this.shadowRoot.querySelector("#tts-entity-select");
+    if (ttsEntitySelect) {
+      ttsEntitySelect.addEventListener("change", () => {
+        const entryId = ttsEntitySelect.dataset.entryId;
+        const settings = { ...this._ttsSettings };
+        settings.tts_entity_id = ttsEntitySelect.value || "";
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    }
+
+    // TTS media select (multi)
+    const ttsMediaSelect = this.shadowRoot.querySelector("#tts-media-select");
+    if (ttsMediaSelect) {
+      ttsMediaSelect.addEventListener("change", () => {
+        const entryId = ttsMediaSelect.dataset.entryId;
+        const selected = Array.from(ttsMediaSelect.selectedOptions).map((o) => o.value);
+        const settings = { ...this._ttsSettings };
+        settings.tts_media_players = selected;
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    }
+
+    // TTS prefix input
+    const ttsPrefixInput = this.shadowRoot.querySelector("#tts-prefix-input");
+    if (ttsPrefixInput) {
+      let debounceTimer;
+      ttsPrefixInput.addEventListener("input", () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const entryId = ttsPrefixInput.dataset.entryId;
+          const settings = { ...this._ttsSettings };
+          settings.tts_message_prefix = ttsPrefixInput.value || "Message from Uber Eats";
+          this._saveTtsSettings(entryId, settings).then(() => this._render());
+        }, 400);
       });
     }
   }

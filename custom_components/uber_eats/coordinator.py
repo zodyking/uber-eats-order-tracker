@@ -5,19 +5,37 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util import dt as dt_util
 
-from .const import ENDPOINT, HEADERS_TEMPLATE
+from .const import (
+    ENDPOINT,
+    HEADERS_TEMPLATE,
+    CONF_TTS_ENABLED,
+    CONF_TTS_ENTITY_ID,
+    CONF_TTS_MEDIA_PLAYERS,
+    CONF_TTS_MESSAGE_PREFIX,
+    DEFAULT_TTS_MESSAGE_PREFIX,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def _no_driver(driver_name):
+    return driver_name in ("No Driver Assigned", "Unknown", None, "")
+
+
+def _has_driver(driver_name):
+    return not _no_driver(driver_name)
+
+
 class UberEatsCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, sid, session_id, account_name, time_zone):
+    def __init__(self, hass, entry_id, sid, session_id, account_name, time_zone):
+        self.entry_id = entry_id
         self.sid = sid
         self.session_id = session_id  # Renamed from uuid
         self.account_name = account_name
         self.time_zone = time_zone
         self.hass = hass
         self._order_history = []  # Per-account history
+        self._previous_data = None  # Set on first update
         super().__init__(
             hass,
             _LOGGER,
@@ -126,6 +144,10 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                         })
                         if len(self._order_history) > 10:
                             self._order_history = self._order_history[-10:]
+
+                    # TTS event detection and announcements (before updating previous)
+                    self._process_tts_events(current_data)
+                    self._previous_data = dict(current_data) if current_data else self._default_data()
 
                     return current_data
 
@@ -236,6 +258,125 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "https://www.openstreetmap.org/export/embed.html"
             f"?bbox={min_lon}%2C{min_lat}%2C{max_lon}%2C{max_lat}&layer=mapnik&marker={lat}%2C{lon}"
         )
+
+    def _process_tts_events(self, current_data):
+        """Detect order events and send TTS if enabled. Fire-and-forget."""
+        from . import tts_notifications
+
+        prev = self._previous_data
+        if prev is None:
+            return  # First run, no prior state to compare
+
+        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        if not entry:
+            return
+        options = entry.options or {}
+        if not options.get(CONF_TTS_ENABLED, False):
+            return
+        tts_entity = options.get(CONF_TTS_ENTITY_ID, "").strip()
+        media_players = options.get(CONF_TTS_MEDIA_PLAYERS, [])
+        prefix = options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX) or DEFAULT_TTS_MESSAGE_PREFIX
+
+        if not tts_entity or not media_players:
+            return
+
+        home_lat = self.hass.config.latitude or 0.0
+        home_lon = self.hass.config.longitude or 0.0
+
+        # Add display status to current_data for status_change message
+        curr_with_status = dict(current_data)
+        curr_with_status["_display_status"] = tts_notifications._get_display_order_status(
+            current_data, home_lat, home_lon
+        )
+        prev_display = tts_notifications._get_display_order_status(prev, home_lat, home_lon)
+
+        def _dist():
+            lat = current_data.get("driver_location_lat")
+            lon = current_data.get("driver_location_lon")
+            if lat is None or lon is None or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+                return None
+            if lat == "No Active Order" or lon == "No Active Order":
+                return None
+            return tts_notifications._distance_feet(float(lat), float(lon), home_lat, home_lon)
+
+        def _prev_dist():
+            lat = prev.get("driver_location_lat")
+            lon = prev.get("driver_location_lon")
+            if lat is None or lon is None or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+                return None
+            if lat == "No Active Order" or lon == "No Active Order":
+                return None
+            return tts_notifications._distance_feet(float(lat), float(lon), home_lat, home_lon)
+
+        messages_to_send = []
+
+        # 1. New order (only if restaurant name present)
+        if not prev.get("active") and current_data.get("active"):
+            rest = (current_data.get("restaurant_name") or "").strip()
+            if rest and rest not in ("No Restaurant", "Unknown"):
+                msg = tts_notifications.build_message(
+                    prefix, self.account_name, curr_with_status, "new_order"
+                )
+                if msg:
+                    messages_to_send.append(("new_order", msg))
+
+        # 2. Driver assigned / unassigned / reassigned
+        prev_driver = prev.get("driver_name", "No Driver Assigned")
+        curr_driver = current_data.get("driver_name", "No Driver Assigned")
+        had_driver = _has_driver(prev_driver)
+        has_driver = _has_driver(curr_driver)
+
+        if had_driver and not has_driver:
+            msg = tts_notifications.build_message(
+                prefix, self.account_name, curr_with_status, "driver_unassigned", prev
+            )
+            if msg:
+                messages_to_send.append(("driver_unassigned", msg))
+        elif not had_driver and has_driver:
+            msg = tts_notifications.build_message(
+                prefix, self.account_name, curr_with_status, "driver_assigned"
+            )
+            if msg:
+                messages_to_send.append(("driver_assigned", msg))
+        elif had_driver and has_driver and prev_driver != curr_driver:
+            msg = tts_notifications.build_message(
+                prefix, self.account_name, curr_with_status, "driver_reassigned"
+            )
+            if msg:
+                messages_to_send.append(("driver_reassigned", msg))
+
+        # 3. Order status change
+        if current_data.get("active") and curr_with_status["_display_status"] != prev_display:
+            msg = tts_notifications.build_message(
+                prefix, self.account_name, curr_with_status, "status_change"
+            )
+            if msg:
+                messages_to_send.append(("status_change", msg))
+
+        # 4. Driver arriving (1000 ft) and 5. Driver arrived (300 ft)
+        curr_dist = _dist()
+        prev_dist_val = _prev_dist()
+        if curr_dist is not None and curr_dist <= 1000:
+            if prev_dist_val is None or prev_dist_val > 1000:
+                msg = tts_notifications.build_message(
+                    prefix, self.account_name, curr_with_status, "driver_arriving"
+                )
+                if msg:
+                    messages_to_send.append(("driver_arriving", msg))
+        if curr_dist is not None and curr_dist <= 300:
+            if prev_dist_val is None or prev_dist_val > 300:
+                msg = tts_notifications.build_message(
+                    prefix, self.account_name, curr_with_status, "driver_arrived"
+                )
+                if msg:
+                    messages_to_send.append(("driver_arrived", msg))
+
+        for _event_type, message in messages_to_send:
+            self.hass.async_create_task(
+                tts_notifications.send_tts_if_idle(
+                    self.hass, tts_entity, media_players, message, cache=False
+                )
+            )
 
 
 __all__ = ["UberEatsCoordinator"]
