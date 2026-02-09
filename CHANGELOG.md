@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## Version 1.2.5
+
+**Released:** February 9, 2026
+
+### Added
+
+- Periodic TTS status updates: configurable interval (5, 10, 15, 20 min) to announce order status, ETA, and ETT.
+- Home Assistant-style chip UI for media player selection (replaces Ctrl/Cmd multi-select).
+
+---
+
 ## Version 1.2.4
 
 **Released:** February 9, 2026
