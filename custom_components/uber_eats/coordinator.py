@@ -283,12 +283,10 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         home_lat = self.hass.config.latitude or 0.0
         home_lon = self.hass.config.longitude or 0.0
 
-        # Add display status to current_data for status_change message
         curr_with_status = dict(current_data)
         curr_with_status["_display_status"] = tts_notifications._get_display_order_status(
             current_data, home_lat, home_lon
         )
-        prev_display = tts_notifications._get_display_order_status(prev, home_lat, home_lon)
 
         def _dist():
             lat = current_data.get("driver_location_lat")
@@ -345,8 +343,10 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             if msg:
                 messages_to_send.append(("driver_reassigned", msg))
 
-        # 3. Order status change
-        if current_data.get("active") and curr_with_status["_display_status"] != prev_display:
+        # 3. Order status change (use order_status/timelineSummary from API)
+        prev_order_status = prev.get("order_status", "")
+        curr_order_status = current_data.get("order_status", "")
+        if current_data.get("active") and curr_order_status and curr_order_status != prev_order_status:
             msg = tts_notifications.build_message(
                 prefix, self.account_name, curr_with_status, "status_change"
             )

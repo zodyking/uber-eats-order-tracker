@@ -93,8 +93,8 @@ def build_message(
         return f"{prefix}, {account_name}, {driver} has been assigned to your {restaurant} order."
 
     if event_type == "status_change":
-        status = order_data.get("_display_status", "Unknown")
-        return f"{prefix}, {account_name}, your {restaurant} order is now {status}."
+        order_status = order_data.get("order_status", "Unknown") or "Unknown"
+        return f"{prefix}, {order_status}."
 
     if event_type == "driver_arriving":
         return f"{prefix}, {account_name}, your driver is nearby."
