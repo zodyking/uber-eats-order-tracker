@@ -1,7 +1,10 @@
-"""TTS notification service for Uber Eats order events."""
+"""TTS notification service for Uber Eats order events.
+
+Uses the same TTS call format as Home-Energy: target TTS entity, send directly
+(no idle wait). See https://github.com/zodyking/Home-Energy
+"""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -16,10 +19,6 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-IDLE_STATES = ("idle", "off", "standby", "unknown")
-IDLE_TIMEOUT_SECONDS = 120
-IDLE_POLL_INTERVAL_SECONDS = 2
 
 # Map order_stage to display labels (matches frontend _displayOrderStatus)
 ORDER_STAGE_LABELS = {
@@ -105,57 +104,73 @@ def build_message(
     return ""
 
 
-async def _wait_for_media_players_idle(
-    hass: HomeAssistant,
-    media_player_ids: list[str],
-) -> bool:
-    """Wait until all media players are idle or timeout."""
-    elapsed = 0
-    while elapsed < IDLE_TIMEOUT_SECONDS:
-        all_idle = True
-        for entity_id in media_player_ids:
-            state = hass.states.get(entity_id)
-            if state is None:
-                continue
-            if state.state.lower() not in IDLE_STATES:
-                all_idle = False
-                break
-        if all_idle:
-            return True
-        await asyncio.sleep(IDLE_POLL_INTERVAL_SECONDS)
-        elapsed += IDLE_POLL_INTERVAL_SECONDS
-    return False
+async def _find_tts_entity(hass: HomeAssistant, language: str | None = None) -> str | None:
+    """Find an available TTS entity (fallback if user config missing)."""
+    lang = (language or "en").lower()
+    tts_entities = []
+    for state in hass.states.async_all():
+        if state.entity_id.startswith("tts."):
+            tts_entities.append(state.entity_id)
+    if not tts_entities:
+        _LOGGER.warning("No TTS entities found in Home Assistant")
+        return None
+    for entity_id in tts_entities:
+        if lang in entity_id.lower():
+            return entity_id
+    return tts_entities[0] if tts_entities else None
 
 
 async def send_tts_if_idle(
     hass: HomeAssistant,
-    entity_id: str,
+    tts_entity_id: str,
     media_player_ids: list[str],
     message: str,
     cache: bool = False,
 ) -> bool:
-    """Send TTS if all media players are idle. Wait up to timeout, then speak."""
-    if not entity_id or not media_player_ids or not message:
-        _LOGGER.warning("TTS skipped: missing entity_id, media_player_ids, or message")
+    """Send TTS to media player(s). Matches Home-Energy format: target TTS entity, speak directly."""
+    if not message or not message.strip():
+        _LOGGER.warning("TTS skipped: empty message")
         return False
 
-    idle = await _wait_for_media_players_idle(hass, media_player_ids)
-    if not idle:
-        _LOGGER.warning("TTS skipped: media players not idle within timeout")
+    if not media_player_ids:
+        _LOGGER.warning("TTS skipped: no media players configured")
         return False
 
+    # Resolve TTS entity (user config or auto-find)
+    tts_entity = (tts_entity_id or "").strip()
+    if not tts_entity:
+        tts_entity = await _find_tts_entity(hass)
+    if not tts_entity:
+        _LOGGER.error("TTS skipped: no TTS entity configured or found")
+        return False
+
+    # Validate at least one media player exists
+    valid_players = [
+        mp for mp in media_player_ids
+        if hass.states.get(mp) is not None
+    ]
+    if not valid_players:
+        _LOGGER.error("TTS skipped: no media players found: %s", media_player_ids)
+        return False
+
+    # Build service call (same format as Home-Energy)
+    media_player_entity_id = valid_players[0] if len(valid_players) == 1 else valid_players
     service_data: dict[str, Any] = {
-        "entity_id": entity_id,
-        "message": message,
-        "cache": cache,
+        "media_player_entity_id": media_player_entity_id,
+        "message": message.strip(),
     }
-    if len(media_player_ids) == 1:
-        service_data["media_player_entity_id"] = media_player_ids[0]
-    else:
-        service_data["media_player_entity_id"] = media_player_ids
+    if cache:
+        service_data["cache"] = True
 
     try:
-        await hass.services.async_call("tts", "speak", service_data)
+        await hass.services.async_call(
+            "tts",
+            "speak",
+            service_data,
+            target={"entity_id": tts_entity},
+            blocking=True,
+        )
+        _LOGGER.debug("TTS sent to %s via %s: %s", media_player_entity_id, tts_entity, message[:50])
         return True
     except Exception as e:
         _LOGGER.error("TTS speak failed: %s", e)

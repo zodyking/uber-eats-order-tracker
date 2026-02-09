@@ -277,7 +277,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         media_players = options.get(CONF_TTS_MEDIA_PLAYERS, [])
         prefix = options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX) or DEFAULT_TTS_MESSAGE_PREFIX
 
-        if not tts_entity or not media_players:
+        if not media_players:
             return
 
         home_lat = self.hass.config.latitude or 0.0
