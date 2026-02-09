@@ -16,6 +16,12 @@ CONF_TTS_MEDIA_PLAYERS = "tts_media_players"
 CONF_TTS_MESSAGE_PREFIX = "tts_message_prefix"
 DEFAULT_TTS_MESSAGE_PREFIX = "Message from Uber Eats"
 
+# Periodic status updates (every 5–20 minutes)
+CONF_TTS_PERIODIC_ENABLED = "tts_periodic_enabled"
+CONF_TTS_PERIODIC_INTERVAL_MINUTES = "tts_periodic_interval_minutes"
+TTS_PERIODIC_INTERVAL_OPTIONS = [5, 10, 15, 20]
+DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES = 10
+
 ENDPOINT = "https://www.ubereats.com/api/getActiveOrdersV1"
 ENDPOINT_PAST_ORDERS = "https://www.ubereats.com/api/getPastOrdersV1"
 HEADERS_TEMPLATE = {

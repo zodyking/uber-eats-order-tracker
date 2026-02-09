@@ -1,7 +1,1 @@
-{
-  "name": "Uber Eats",
-  "render_readme": true,
-  "content_in_root": false,
-  "homeassistant": "2023.9.0",
-  "zip_release": false
-}
+{"name":"Uber Eats","render_readme":true,"content_in_root":true,"homeassistant":"2023.9.0","zip_release":false}

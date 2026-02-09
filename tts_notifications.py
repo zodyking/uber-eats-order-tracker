@@ -102,6 +102,18 @@ def build_message(
     if event_type == "driver_arrived":
         return f"{prefix}, {account_name}, your driver is near your home."
 
+    if event_type == "periodic":
+        status = order_data.get("_display_status", "Unknown")
+        eta_str = order_data.get("driver_eta_str", "No ETA Available")
+        minutes = order_data.get("minutes_remaining")
+        if eta_str and eta_str not in ("No ETA Available", "Unknown", "N/A", ""):
+            if minutes is not None and minutes >= 0:
+                ett = f", about {minutes} minute{'s' if minutes != 1 else ''} remaining"
+            else:
+                ett = ""
+            return f"{prefix}, {account_name}, your {restaurant} order is {status}. ETA {eta_str}{ett}."
+        return f"{prefix}, {account_name}, your {restaurant} order is {status}. No ETA available."
+
     return ""
 
 

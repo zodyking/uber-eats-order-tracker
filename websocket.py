@@ -19,6 +19,10 @@ from .const import (
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
     DEFAULT_TTS_MESSAGE_PREFIX,
+    CONF_TTS_PERIODIC_ENABLED,
+    CONF_TTS_PERIODIC_INTERVAL_MINUTES,
+    TTS_PERIODIC_INTERVAL_OPTIONS,
+    DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -357,11 +361,16 @@ async def websocket_get_tts_settings(
         return
 
     options = entry.options or {}
+    interval = options.get(CONF_TTS_PERIODIC_INTERVAL_MINUTES, DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES)
+    if interval not in TTS_PERIODIC_INTERVAL_OPTIONS:
+        interval = DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES
     connection.send_result(msg["id"], {
         "tts_enabled": options.get(CONF_TTS_ENABLED, False),
         "tts_entity_id": options.get(CONF_TTS_ENTITY_ID, ""),
         "tts_media_players": options.get(CONF_TTS_MEDIA_PLAYERS, []),
         "tts_message_prefix": options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX),
+        "tts_periodic_enabled": options.get(CONF_TTS_PERIODIC_ENABLED, False),
+        "tts_periodic_interval_minutes": interval,
     })
 
 
@@ -373,6 +382,8 @@ async def websocket_get_tts_settings(
         vol.Required("tts_entity_id"): str,
         vol.Required("tts_media_players"): list,
         vol.Required("tts_message_prefix"): str,
+        vol.Required("tts_periodic_enabled"): bool,
+        vol.Required("tts_periodic_interval_minutes"): vol.All(int, vol.In([5, 10, 15, 20])),
     }
 )
 @websocket_api.async_response
@@ -395,6 +406,11 @@ async def websocket_update_tts_settings(
         e for e in msg["tts_media_players"] if isinstance(e, str) and e.startswith("media_player.")
     ]
     options[CONF_TTS_MESSAGE_PREFIX] = (msg["tts_message_prefix"] or "").strip() or DEFAULT_TTS_MESSAGE_PREFIX
+    options[CONF_TTS_PERIODIC_ENABLED] = msg["tts_periodic_enabled"]
+    interval = msg.get("tts_periodic_interval_minutes", DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES)
+    options[CONF_TTS_PERIODIC_INTERVAL_MINUTES] = (
+        interval if interval in TTS_PERIODIC_INTERVAL_OPTIONS else DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES
+    )
 
     hass.config_entries.async_update_entry(entry, options=options)
     connection.send_result(msg["id"], {"success": True})

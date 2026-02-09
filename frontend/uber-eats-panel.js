@@ -178,6 +178,8 @@ class UberEatsPanel extends HTMLElement {
         tts_entity_id: "",
         tts_media_players: [],
         tts_message_prefix: "Message from Uber Eats",
+        tts_periodic_enabled: false,
+        tts_periodic_interval_minutes: 10,
       };
     }
   }
@@ -192,6 +194,10 @@ class UberEatsPanel extends HTMLElement {
         tts_entity_id: settings.tts_entity_id,
         tts_media_players: settings.tts_media_players,
         tts_message_prefix: settings.tts_message_prefix || "Message from Uber Eats",
+        tts_periodic_enabled: !!settings.tts_periodic_enabled,
+        tts_periodic_interval_minutes: [5, 10, 15, 20].includes(settings.tts_periodic_interval_minutes)
+          ? settings.tts_periodic_interval_minutes
+          : 10,
       });
       this._ttsSettings = settings;
     } catch (e) {
@@ -1025,6 +1031,111 @@ class UberEatsPanel extends HTMLElement {
           min-height: 80px;
           max-height: 120px;
         }
+        .tts-entity-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          min-height: 44px;
+          padding: 8px 12px;
+          background: #111;
+          border: 2px solid #333;
+          border-radius: 8px;
+          align-items: center;
+        }
+        .tts-entity-chips-empty {
+          color: #666;
+          font-size: 13px;
+        }
+        .tts-entity-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: #2a2a2a;
+          border: 1px solid #444;
+          border-radius: 20px;
+          font-size: 13px;
+          color: #fff;
+        }
+        .tts-entity-chip-remove {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 18px;
+          height: 18px;
+          padding: 0;
+          background: transparent;
+          border: none;
+          border-radius: 50%;
+          color: #888;
+          cursor: pointer;
+          font-size: 16px;
+          line-height: 1;
+          transition: color 0.2s, background 0.2s;
+        }
+        .tts-entity-chip-remove:hover {
+          color: #f44336;
+          background: rgba(244, 67, 54, 0.2);
+        }
+        .tts-entity-add-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 8px;
+        }
+        .tts-entity-add-select {
+          flex: 1;
+          padding: 10px 14px;
+          background: #111;
+          border: 2px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+        }
+        .tts-entity-add-select:focus {
+          outline: none;
+          border-color: #06C167;
+        }
+        .tts-entity-add-btn {
+          padding: 10px 16px;
+          background: #06C167;
+          border: none;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s, opacity 0.2s;
+        }
+        .tts-entity-add-btn:hover {
+          background: #05a858;
+        }
+        .tts-entity-add-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .tts-periodic-row {
+          margin-top: 24px;
+          padding-top: 20px;
+          border-top: 1px solid #333;
+        }
+        .section-subtitle {
+          font-size: 13px;
+          color: #aaa;
+          margin-bottom: 12px;
+        }
+        .tts-periodic-controls {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .tts-interval-select {
+          padding: 8px 12px;
+          background: #111;
+          border: 2px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+        }
       </style>
     `;
   }
@@ -1434,8 +1545,14 @@ class UberEatsPanel extends HTMLElement {
       tts_entity_id: "",
       tts_media_players: [],
       tts_message_prefix: "Message from Uber Eats",
+      tts_periodic_enabled: false,
+      tts_periodic_interval_minutes: 10,
     };
     const enabled = !!settings.tts_enabled;
+    const periodicEnabled = !!settings.tts_periodic_enabled;
+    const interval = [5, 10, 15, 20].includes(settings.tts_periodic_interval_minutes)
+      ? settings.tts_periodic_interval_minutes
+      : 10;
     const ttsList = this._ttsEntities?.tts_entities || [];
     const mediaList = this._ttsEntities?.media_player_entities || [];
     const selectedMedia = Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [];
@@ -1445,9 +1562,15 @@ class UberEatsPanel extends HTMLElement {
       `<option value="${e.entity_id}" ${e.entity_id === settings.tts_entity_id ? "selected" : ""}>${e.name || e.entity_id}</option>`
     ).join("");
 
-    const mediaOptions = mediaList.map((e) =>
-      `<option value="${e.entity_id}" ${selectedMedia.includes(e.entity_id) ? "selected" : ""}>${e.name || e.entity_id}</option>`
+    const availableMedia = mediaList.filter((e) => !selectedMedia.includes(e.entity_id));
+    const mediaAddOptions = availableMedia.map((e) =>
+      `<option value="${e.entity_id}">${e.name || e.entity_id}</option>`
     ).join("");
+    const selectedChips = selectedMedia.map((entityId) => {
+      const ent = mediaList.find((e) => e.entity_id === entityId);
+      const name = ent ? (ent.name || ent.entity_id) : entityId;
+      return { entity_id: entityId, name };
+    });
 
     return `
       <div class="tts-section">
@@ -1465,14 +1588,41 @@ class UberEatsPanel extends HTMLElement {
             </select>
           </div>
           <div class="tts-field ${enabled ? "" : "disabled"}">
-            <label>Media Players (hold Ctrl/Cmd to select multiple)</label>
-            <select id="tts-media-select" class="tts-multi-select" multiple data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
-              ${mediaOptions}
-            </select>
+            <label>Media Players</label>
+            <div class="tts-entity-chips" id="tts-media-chips" data-entry-id="${acc.entry_id}">
+              ${selectedChips.length === 0 ? '<span class="tts-entity-chips-empty">No media players selected</span>' : selectedChips.map((c) => `
+                <span class="tts-entity-chip" data-entity-id="${c.entity_id.replace(/"/g, "&quot;")}">
+                  ${(c.name || c.entity_id).replace(/</g, "&lt;")}
+                  <button type="button" class="tts-entity-chip-remove" data-entity-id="${c.entity_id.replace(/"/g, "&quot;")}" title="Remove" aria-label="Remove ${(c.name || c.entity_id).replace(/"/g, "&quot;")}">&times;</button>
+                </span>
+              `).join("")}
+            </div>
+            <div class="tts-entity-add-row">
+              <select id="tts-media-add-select" class="tts-entity-add-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
+                <option value="">Add media player...</option>
+                ${mediaAddOptions}
+              </select>
+              <button type="button" class="tts-entity-add-btn" id="tts-media-add-btn" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>Add</button>
+            </div>
           </div>
           <div class="tts-field ${enabled ? "" : "disabled"}">
             <label>Message Prefix</label>
             <input type="text" id="tts-prefix-input" value="${prefix.replace(/"/g, "&quot;")}" placeholder="Message from Uber Eats" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
+          </div>
+        </div>
+        <div class="tts-periodic-row">
+          <div class="section-subtitle">Periodic status updates</div>
+          <div class="tts-toggle-row">
+            <label>Announce order status, ETA, and ETT every</label>
+            <div class="tts-periodic-controls">
+              <select id="tts-periodic-interval" class="tts-interval-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
+                <option value="5" ${interval === 5 ? "selected" : ""}>5 minutes</option>
+                <option value="10" ${interval === 10 ? "selected" : ""}>10 minutes</option>
+                <option value="15" ${interval === 15 ? "selected" : ""}>15 minutes</option>
+                <option value="20" ${interval === 20 ? "selected" : ""}>20 minutes</option>
+              </select>
+              <div class="tts-toggle ${periodicEnabled && enabled ? "enabled" : ""} ${enabled ? "" : "disabled"}" id="tts-periodic-toggle" data-entry-id="${acc.entry_id}" data-enabled="${enabled}" role="button" tabindex="0" aria-pressed="${periodicEnabled}"><span class="tts-toggle-knob"></span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1558,10 +1708,13 @@ class UberEatsPanel extends HTMLElement {
       const toggleHandler = () => {
         const nextEnabled = !this._ttsSettings?.tts_enabled;
         const settings = {
+          ...this._ttsSettings,
           tts_enabled: nextEnabled,
           tts_entity_id: this._ttsSettings?.tts_entity_id || "",
           tts_media_players: this._ttsSettings?.tts_media_players || [],
           tts_message_prefix: this._ttsSettings?.tts_message_prefix || "Message from Uber Eats",
+          tts_periodic_enabled: this._ttsSettings?.tts_periodic_enabled ?? false,
+          tts_periodic_interval_minutes: this._ttsSettings?.tts_periodic_interval_minutes ?? 10,
         };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       };
@@ -1579,21 +1732,40 @@ class UberEatsPanel extends HTMLElement {
     if (ttsEntitySelect) {
       ttsEntitySelect.addEventListener("change", () => {
         const entryId = ttsEntitySelect.dataset.entryId;
-        const settings = { ...this._ttsSettings };
-        settings.tts_entity_id = ttsEntitySelect.value || "";
+        const settings = { ...this._ttsSettings, tts_entity_id: ttsEntitySelect.value || "" };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       });
     }
 
-    // TTS media select (multi)
-    const ttsMediaSelect = this.shadowRoot.querySelector("#tts-media-select");
-    if (ttsMediaSelect) {
-      ttsMediaSelect.addEventListener("change", () => {
-        const entryId = ttsMediaSelect.dataset.entryId;
-        const selected = Array.from(ttsMediaSelect.selectedOptions).map((o) => o.value);
-        const settings = { ...this._ttsSettings };
-        settings.tts_media_players = selected;
+    // TTS media chips - remove on chip X click
+    const ttsMediaChips = this.shadowRoot.querySelector("#tts-media-chips");
+    if (ttsMediaChips) {
+      ttsMediaChips.addEventListener("click", (e) => {
+        const btn = e.target.closest(".tts-entity-chip-remove");
+        if (!btn) return;
+        const entityId = btn.dataset.entityId;
+        const entryId = ttsMediaChips.dataset.entryId;
+        const selected = (this._ttsSettings?.tts_media_players || []).filter((id) => id !== entityId);
+        const settings = { ...this._ttsSettings, tts_media_players: selected };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    }
+
+    // TTS media add button
+    const ttsMediaAddBtn = this.shadowRoot.querySelector("#tts-media-add-btn");
+    const ttsMediaAddSelect = this.shadowRoot.querySelector("#tts-media-add-select");
+    if (ttsMediaAddBtn && ttsMediaAddSelect) {
+      const addMedia = () => {
+        const val = ttsMediaAddSelect.value;
+        if (!val) return;
+        const entryId = ttsMediaAddBtn.dataset.entryId;
+        const selected = [...(this._ttsSettings?.tts_media_players || []), val];
+        const settings = { ...this._ttsSettings, tts_media_players: selected };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      ttsMediaAddBtn.addEventListener("click", addMedia);
+      ttsMediaAddSelect.addEventListener("change", () => {
+        if (ttsMediaAddSelect.value) addMedia();
       });
     }
 
@@ -1605,10 +1777,45 @@ class UberEatsPanel extends HTMLElement {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           const entryId = ttsPrefixInput.dataset.entryId;
-          const settings = { ...this._ttsSettings };
-          settings.tts_message_prefix = ttsPrefixInput.value || "Message from Uber Eats";
+          const settings = { ...this._ttsSettings, tts_message_prefix: ttsPrefixInput.value || "Message from Uber Eats" };
           this._saveTtsSettings(entryId, settings).then(() => this._render());
         }, 400);
+      });
+    }
+
+    // TTS periodic toggle
+    const ttsPeriodicToggle = this.shadowRoot.querySelector("#tts-periodic-toggle");
+    if (ttsPeriodicToggle && ttsPeriodicToggle.dataset.enabled === "true") {
+      const entryId = ttsPeriodicToggle.dataset.entryId;
+      const periodicHandler = () => {
+        const nextPeriodic = !this._ttsSettings?.tts_periodic_enabled;
+        const settings = {
+          ...this._ttsSettings,
+          tts_periodic_enabled: nextPeriodic,
+          tts_periodic_interval_minutes: this._ttsSettings?.tts_periodic_interval_minutes ?? 10,
+        };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      ttsPeriodicToggle.addEventListener("click", periodicHandler);
+      ttsPeriodicToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          periodicHandler();
+        }
+      });
+    }
+
+    // TTS periodic interval select
+    const ttsPeriodicInterval = this.shadowRoot.querySelector("#tts-periodic-interval");
+    if (ttsPeriodicInterval && !ttsPeriodicInterval.disabled) {
+      ttsPeriodicInterval.addEventListener("change", () => {
+        const entryId = ttsPeriodicInterval.dataset.entryId;
+        const interval = parseInt(ttsPeriodicInterval.value, 10);
+        const settings = {
+          ...this._ttsSettings,
+          tts_periodic_interval_minutes: [5, 10, 15, 20].includes(interval) ? interval : 10,
+        };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
       });
     }
   }

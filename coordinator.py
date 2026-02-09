@@ -13,6 +13,9 @@ from .const import (
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
     DEFAULT_TTS_MESSAGE_PREFIX,
+    CONF_TTS_PERIODIC_ENABLED,
+    CONF_TTS_PERIODIC_INTERVAL_MINUTES,
+    DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +39,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self.hass = hass
         self._order_history = []  # Per-account history
         self._previous_data = None  # Set on first update
+        self._last_periodic_tts_time = None  # When we last sent a periodic status update
         super().__init__(
             hass,
             _LOGGER,
@@ -147,6 +151,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
 
                     # TTS event detection and announcements (before updating previous)
                     self._process_tts_events(current_data)
+                    self._process_periodic_tts(current_data)
                     self._previous_data = dict(current_data) if current_data else self._default_data()
 
                     return current_data
@@ -375,6 +380,64 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             self.hass.async_create_task(
                 tts_notifications.send_tts_if_idle(
                     self.hass, tts_entity, media_players, message, cache=False
+                )
+            )
+
+    def _process_periodic_tts(self, current_data):
+        """Send periodic status/ETA/ETT TTS if enabled and interval elapsed."""
+        if not current_data.get("active"):
+            self._last_periodic_tts_time = None
+            return
+
+        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        if not entry:
+            return
+        options = entry.options or {}
+        if not options.get(CONF_TTS_ENABLED, False):
+            return
+        if not options.get(CONF_TTS_PERIODIC_ENABLED, False):
+            return
+        tts_entity = options.get(CONF_TTS_ENTITY_ID, "").strip()
+        media_players = options.get(CONF_TTS_MEDIA_PLAYERS, [])
+        prefix = options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX) or DEFAULT_TTS_MESSAGE_PREFIX
+        interval_min = options.get(CONF_TTS_PERIODIC_INTERVAL_MINUTES, DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES)
+        if interval_min not in (5, 10, 15, 20):
+            interval_min = DEFAULT_TTS_PERIODIC_INTERVAL_MINUTES
+
+        if not tts_entity or not media_players:
+            return
+
+        now = dt_util.now()
+        if self._last_periodic_tts_time is None:
+            self._last_periodic_tts_time = now
+            return
+
+        elapsed = (now - self._last_periodic_tts_time).total_seconds()
+        if elapsed < interval_min * 60:
+            return
+
+        from . import tts_notifications
+
+        home_lat = self.hass.config.latitude or 0.0
+        home_lon = self.hass.config.longitude or 0.0
+        curr_with_status = dict(current_data)
+        curr_with_status["_display_status"] = tts_notifications._get_display_order_status(
+            current_data, home_lat, home_lon
+        )
+        msg = tts_notifications.build_message(
+            prefix, self.account_name, curr_with_status, "periodic"
+        )
+        if msg:
+            self._last_periodic_tts_time = now
+            _LOGGER.info(
+                "Periodic TTS update for %s: %s (interval %d min)",
+                self.account_name,
+                msg[:80] + "..." if len(msg) > 80 else msg,
+                interval_min,
+            )
+            self.hass.async_create_task(
+                tts_notifications.send_tts_if_idle(
+                    self.hass, tts_entity, media_players, msg, cache=False
                 )
             )
 
