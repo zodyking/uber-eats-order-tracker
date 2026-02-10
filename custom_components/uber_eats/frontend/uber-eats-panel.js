@@ -633,7 +633,6 @@ class UberEatsPanel extends HTMLElement {
           height: 100%;
           border: none;
           filter: grayscale(100%) invert(100%) contrast(90%);
-          pointer-events: none;
         }
         
         .map-overlay {
@@ -646,7 +645,6 @@ class UberEatsPanel extends HTMLElement {
           font-size: 12px;
           font-weight: 500;
           color: #06C167;
-          pointer-events: none;
         }
         
         /* Instructions Page */
@@ -1830,12 +1828,12 @@ class UberEatsPanel extends HTMLElement {
       backBtn.addEventListener("click", () => this._goBack());
     }
 
-    // Account cards
+    // Account cards: click opens account details (left side hits card; map iframe captures its own clicks)
     const cards = this.shadowRoot.querySelectorAll(".account-card");
-    cards.forEach(card => {
-      card.addEventListener("click", () => {
+    cards.forEach((card) => {
+      card.addEventListener("click", (e) => {
         const entryId = card.dataset.entryId;
-        this._selectAccount(entryId);
+        if (entryId) this._selectAccount(entryId);
       });
     });
 
