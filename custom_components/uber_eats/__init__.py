@@ -1,6 +1,7 @@
 """The Uber Eats integration."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 
@@ -90,6 +91,15 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     panel_path = os.path.join(os.path.dirname(__file__), "frontend")
     panel_url = f"/{DOMAIN}_panel"
 
+    # Version from manifest for cache-busting so panel UI updates are picked up
+    try:
+        manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
+        with open(manifest_path, encoding="utf-8") as f:
+            _manifest = json.load(f)
+        _panel_version = _manifest.get("version", "1.0.0")
+    except Exception:
+        _panel_version = "1.0.0"
+
     # Register static path for the panel files
     try:
         await hass.http.async_register_static_paths([
@@ -98,7 +108,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     except Exception as e:
         _LOGGER.warning("Failed to register static path: %s", e)
 
-    # Register the custom panel
+    # Register the custom panel (version in URL so browser loads new JS after updates)
     try:
         await panel_custom.async_register_panel(
             hass,
@@ -106,7 +116,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path=PANEL_URL,
             sidebar_title=PANEL_TITLE,
             sidebar_icon=PANEL_ICON,
-            module_url=f"{panel_url}/uber-eats-panel.js",
+            module_url=f"{panel_url}/uber-eats-panel.js?v={_panel_version}",
             embed_iframe=False,
             require_admin=False,
         )
