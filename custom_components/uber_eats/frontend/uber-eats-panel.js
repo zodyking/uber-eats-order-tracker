@@ -489,6 +489,7 @@ class UberEatsPanel extends HTMLElement {
           display: flex;
           flex-direction: column;
           justify-content: center;
+          cursor: pointer;
         }
         
         .card-header {
@@ -1828,12 +1829,12 @@ class UberEatsPanel extends HTMLElement {
       backBtn.addEventListener("click", () => this._goBack());
     }
 
-    // Account cards: click opens account details (left side hits card; map iframe captures its own clicks)
-    const cards = this.shadowRoot.querySelectorAll(".account-card");
-    cards.forEach((card) => {
-      card.addEventListener("click", (e) => {
-        const entryId = card.dataset.entryId;
-        if (entryId) this._selectAccount(entryId);
+    // Account cards: click on left (info) area opens account details; map stays interactive
+    const cardInfos = this.shadowRoot.querySelectorAll(".account-card .card-info");
+    cardInfos.forEach((info) => {
+      info.addEventListener("click", () => {
+        const card = info.closest(".account-card");
+        if (card && card.dataset.entryId) this._selectAccount(card.dataset.entryId);
       });
     });
 
