@@ -1,17 +1,18 @@
 """TTS notification service for Uber Eats order events.
 
-Uses the same TTS call format as Home-Energy: target TTS entity, send directly
-(no idle wait). See https://github.com/zodyking/Home-Energy
+Messages from Agent-Files/tts.md. Sends one TTS per media player in parallel,
+with volume_set before each. No idle check.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.const import ATTR_ENTITY_ID
 
 from .const import (
-    CONF_TTS_ENABLED,
     CONF_TTS_ENTITY_ID,
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
@@ -19,51 +20,6 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# Map order_stage to display labels (matches frontend _displayOrderStatus)
-ORDER_STAGE_LABELS = {
-    "preparing": "Preparing",
-    "picked up": "Picked up",
-    "en route": "En route",
-    "arriving": "Arriving",
-    "delivered": "Delivered",
-    "complete": "Complete",
-}
-
-
-def _distance_feet(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine distance in feet between two lat/lon points."""
-    import math
-    R = 6371000  # Earth radius in meters
-    to_rad = lambda x: x * 3.141592653589793 / 180
-    d_lat = to_rad(lat2 - lat1)
-    d_lon = to_rad(lon2 - lon1)
-    a = (
-        math.sin(d_lat / 2) ** 2
-        + math.cos(to_rad(lat1)) * math.cos(to_rad(lat2)) * math.sin(d_lon / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return (R * c) * 3.28084  # meters to feet
-
-
-def _get_display_order_status(data: dict[str, Any], home_lat: float, home_lon: float) -> str:
-    """Derive display order status (matches frontend logic)."""
-    if not data.get("active"):
-        return "No Active Order"
-    driver_name = data.get("driver_name") or ""
-    no_driver = driver_name in ("No Driver Assigned", "Unknown", None, "")
-    if no_driver:
-        return "Preparing order"
-    lat = data.get("driver_location_lat")
-    lon = data.get("driver_location_lon")
-    if lat is not None and lon is not None and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-        dist = _distance_feet(float(lat), float(lon), home_lat, home_lon)
-        if dist <= 300:
-            return "Arrived"
-        if dist <= 1000:
-            return "Arriving"
-    stage = (data.get("order_stage") or "").lower()
-    return ORDER_STAGE_LABELS.get(stage, data.get("order_stage", "—") or "—")
 
 
 def build_message(
@@ -73,33 +29,38 @@ def build_message(
     event_type: str,
     prior_data: dict[str, Any] | None = None,
 ) -> str:
-    """Build TTS message for a given event type."""
+    """Build TTS message from Agent-Files/tts.md templates."""
     prefix = prefix or DEFAULT_TTS_MESSAGE_PREFIX
-    restaurant = order_data.get("restaurant_name", "Unknown") or "Unknown"
-    driver = order_data.get("driver_name", "No Driver Assigned") or "No Driver Assigned"
+    restaurant = (order_data.get("restaurant_name") or "Unknown").strip() or "Unknown"
+    driver = (order_data.get("driver_name") or "No Driver Assigned").strip() or "No Driver Assigned"
+    user = account_name or "you"
 
     if event_type == "new_order":
-        return f"{prefix}, A new {restaurant} order received for {account_name}."
+        return f"{prefix}, a new {restaurant} order received for {user}."
 
     if event_type == "driver_assigned":
-        return f"{prefix}, {account_name}, {driver} has been assigned to your {restaurant} order."
-
-    if event_type == "driver_unassigned":
-        prior_driver = (prior_data or {}).get("driver_name", "The driver") or "The driver"
-        return f"{prefix}, {account_name}, {prior_driver} could not take delivery of your {restaurant} order. We're looking for a new driver."
-
-    if event_type == "driver_reassigned":
-        return f"{prefix}, {account_name}, {driver} has been assigned to your {restaurant} order."
+        return f"{prefix}, {user}, {driver} has been assigned to your {restaurant} order."
 
     if event_type == "status_change":
-        order_status = order_data.get("order_status", "Unknown") or "Unknown"
-        return f"{prefix}, {order_status}."
+        timeline_text = (order_data.get("order_status") or order_data.get("order_status_description") or "").strip()
+        if not timeline_text or timeline_text in ("Unknown", "No Active Order"):
+            return ""
+        return f"{prefix}, regarding {user}'s {restaurant} order, {timeline_text}."
 
-    if event_type == "driver_arriving":
-        return f"{prefix}, {account_name}, your driver is nearby."
-
-    if event_type == "driver_arrived":
-        return f"{prefix}, {account_name}, your driver is near your home."
+    if event_type == "interval_update":
+        street = (order_data.get("driver_location_street") or "unknown street").strip()
+        if street in ("No Driver Assigned", "Unknown", ""):
+            street = "unknown street"
+        county = (order_data.get("driver_location_county") or "").strip()
+        suburb = (order_data.get("driver_location_suburb") or "").strip()
+        if county and "new york" in county.lower():
+            place = suburb or county or "unknown area"
+        else:
+            place = county or suburb or "unknown area"
+        eta = (order_data.get("driver_eta_str") or "—").strip()
+        ett = order_data.get("minutes_remaining")
+        ett_str = f"{ett} minutes" if ett is not None and ett != "" else "—"
+        return f"{prefix}, {driver} was last seen near {street} in {place}, expected to arrive at {eta} in {ett_str}."
 
     return ""
 
@@ -120,14 +81,47 @@ async def _find_tts_entity(hass: HomeAssistant, language: str | None = None) -> 
     return tts_entities[0] if tts_entities else None
 
 
+async def _send_tts_to_one(
+    hass: HomeAssistant,
+    tts_entity: str,
+    media_player_id: str,
+    message: str,
+    volume_level: float,
+    cache: bool,
+) -> None:
+    """Set volume then send TTS to a single media player."""
+    volume_level = max(0.0, min(1.0, volume_level))
+    try:
+        await hass.services.async_call(
+            "media_player",
+            "volume_set",
+            {ATTR_ENTITY_ID: media_player_id, "volume_level": volume_level},
+            blocking=True,
+        )
+    except Exception as e:
+        _LOGGER.warning("Volume set failed for %s: %s", media_player_id, e)
+    try:
+        await hass.services.async_call(
+            "tts",
+            "speak",
+            {"media_player_entity_id": media_player_id, "message": message, **({"cache": True} if cache else {})},
+            target={"entity_id": tts_entity},
+            blocking=True,
+        )
+        _LOGGER.debug("TTS sent to %s via %s", media_player_id, tts_entity)
+    except Exception as e:
+        _LOGGER.error("TTS speak failed for %s: %s", media_player_id, e)
+
+
 async def send_tts_if_idle(
     hass: HomeAssistant,
     tts_entity_id: str,
     media_player_ids: list[str],
     message: str,
     cache: bool = False,
+    volume_level: float = 0.5,
 ) -> bool:
-    """Send TTS to media player(s). Matches Home-Energy format: target TTS entity, speak directly."""
+    """Send TTS to each media player in parallel; volume_set before each. No idle check."""
     if not message or not message.strip():
         _LOGGER.warning("TTS skipped: empty message")
         return False
@@ -136,7 +130,6 @@ async def send_tts_if_idle(
         _LOGGER.warning("TTS skipped: no media players configured")
         return False
 
-    # Resolve TTS entity (user config or auto-find)
     tts_entity = (tts_entity_id or "").strip()
     if not tts_entity:
         tts_entity = await _find_tts_entity(hass)
@@ -144,34 +137,16 @@ async def send_tts_if_idle(
         _LOGGER.error("TTS skipped: no TTS entity configured or found")
         return False
 
-    # Validate at least one media player exists
-    valid_players = [
-        mp for mp in media_player_ids
-        if hass.states.get(mp) is not None
-    ]
+    valid_players = [mp for mp in media_player_ids if hass.states.get(mp) is not None]
     if not valid_players:
         _LOGGER.error("TTS skipped: no media players found: %s", media_player_ids)
         return False
 
-    # Build service call (same format as Home-Energy)
-    media_player_entity_id = valid_players[0] if len(valid_players) == 1 else valid_players
-    service_data: dict[str, Any] = {
-        "media_player_entity_id": media_player_entity_id,
-        "message": message.strip(),
-    }
-    if cache:
-        service_data["cache"] = True
-
-    try:
-        await hass.services.async_call(
-            "tts",
-            "speak",
-            service_data,
-            target={"entity_id": tts_entity},
-            blocking=True,
-        )
-        _LOGGER.debug("TTS sent to %s via %s: %s", media_player_entity_id, tts_entity, message[:50])
-        return True
-    except Exception as e:
-        _LOGGER.error("TTS speak failed: %s", e)
-        return False
+    msg = message.strip()
+    await asyncio.gather(
+        *[
+            _send_tts_to_one(hass, tts_entity, mp, msg, volume_level, cache)
+            for mp in valid_players
+        ]
+    )
+    return True

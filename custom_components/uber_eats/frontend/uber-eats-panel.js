@@ -33,6 +33,8 @@ class UberEatsPanel extends HTMLElement {
     this._refreshInterval = null;
     this._ttsEntities = { tts_entities: [], media_player_entities: [] };
     this._ttsSettings = null;
+    this._automations = [];
+    this._advancedSettingsCollapsed = true;
   }
 
   set hass(hass) {
@@ -148,6 +150,7 @@ class UberEatsPanel extends HTMLElement {
       await Promise.all([
         this._loadTtsSettings(entryId),
         this._loadTtsEntities(),
+        this._loadAutomations(),
       ]);
       this._render();
     }
@@ -178,25 +181,49 @@ class UberEatsPanel extends HTMLElement {
         tts_entity_id: "",
         tts_media_players: [],
         tts_message_prefix: "Message from Uber Eats",
+        tts_volume: 0.5,
+        tts_interval_enabled: false,
+        tts_interval_minutes: 10,
+        driver_nearby_automation_enabled: false,
+        driver_nearby_automation_entity: "",
+        driver_nearby_distance_feet: 200,
       };
+    }
+  }
+
+  async _loadAutomations() {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({ type: "uber_eats/get_automations" });
+      this._automations = result.automations || [];
+    } catch (e) {
+      console.error("Failed to load automations:", e);
+      this._automations = [];
     }
   }
 
   async _saveTtsSettings(entryId, settings) {
     if (!this._hass) return;
     try {
-      await this._hass.callWS({
+      const payload = {
         type: "uber_eats/update_tts_settings",
         entry_id: entryId,
         tts_enabled: settings.tts_enabled,
-        tts_entity_id: settings.tts_entity_id,
-        tts_media_players: settings.tts_media_players,
+        tts_entity_id: settings.tts_entity_id || "",
+        tts_media_players: Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [],
         tts_message_prefix: settings.tts_message_prefix || "Message from Uber Eats",
-      });
+      };
+      if (settings.tts_volume != null) payload.tts_volume = settings.tts_volume;
+      if (settings.tts_interval_enabled != null) payload.tts_interval_enabled = settings.tts_interval_enabled;
+      if (settings.tts_interval_minutes != null) payload.tts_interval_minutes = settings.tts_interval_minutes;
+      if (settings.driver_nearby_automation_enabled != null) payload.driver_nearby_automation_enabled = settings.driver_nearby_automation_enabled;
+      if (settings.driver_nearby_automation_entity != null) payload.driver_nearby_automation_entity = settings.driver_nearby_automation_entity || "";
+      if (settings.driver_nearby_distance_feet != null) payload.driver_nearby_distance_feet = settings.driver_nearby_distance_feet;
+      await this._hass.callWS(payload);
       this._ttsSettings = settings;
     } catch (e) {
       console.error("Failed to save TTS settings:", e);
-      alert("Failed to save TTS settings: " + (e.message || e));
+      alert("Failed to save settings: " + (e.message || e));
     }
   }
 
@@ -502,9 +529,73 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .card-details {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-          gap: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        
+        .card-oneline {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: #ccc;
+        }
+        
+        .card-oneline .card-oneline-label {
+          color: #888;
+          flex-shrink: 0;
+        }
+        .card-oneline .card-oneline-sep {
+          color: #555;
+          flex-shrink: 0;
+        }
+        .card-oneline .card-oneline-value {
+          color: #ccc;
+        }
+        
+        .card-timeline {
+          font-size: 15px;
+          color: #fff;
+          font-weight: 500;
+          line-height: 1.4;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+        
+        /* Card stage progress bar - full width of info column */
+        .card-stage-progress {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid #2a2a2a;
+        }
+        
+        .card-stage-bar {
+          flex: 1;
+          height: 6px;
+          background: #2a2a2a;
+          border-radius: 3px;
+          overflow: hidden;
+          transition: background 0.25s ease;
+        }
+        
+        .card-stage-bar.active {
+          background: #06C167;
+        }
+        
+        .card-stage-bar.current {
+          background: linear-gradient(90deg, #06C167 50%, #2a2a2a 50%);
+          animation: card-progress-pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes card-progress-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.75; }
         }
         
         .detail-item {
@@ -1025,6 +1116,150 @@ class UberEatsPanel extends HTMLElement {
           min-height: 80px;
           max-height: 120px;
         }
+        /* Advanced settings card (collapsible) */
+        .advanced-settings-section {
+          background: #1a1a1a;
+          border-radius: 16px;
+          margin-bottom: 24px;
+          overflow: hidden;
+        }
+        .advanced-settings-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 20px 24px;
+          cursor: pointer;
+          user-select: none;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .advanced-settings-header:hover {
+          background: rgba(255,255,255,0.03);
+        }
+        .advanced-settings-header .section-title {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 600;
+        }
+        .advanced-settings-header .collapse-icon {
+          width: 24px;
+          height: 24px;
+          color: #888;
+          transition: transform 0.2s;
+        }
+        .advanced-settings-section.collapsed .collapse-icon {
+          transform: rotate(-90deg);
+        }
+        .advanced-settings-body {
+          padding: 0 24px 24px;
+        }
+        .advanced-settings-section.collapsed .advanced-settings-body {
+          display: none;
+        }
+        .advanced-settings-body .tts-toggle-row {
+          margin-bottom: 20px;
+        }
+        .advanced-settings-body .tts-fields {
+          display: grid;
+          gap: 16px;
+        }
+        .media-players-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
+          min-height: 44px;
+          padding: 8px 0;
+        }
+        .media-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 12px;
+          background: #333;
+          border-radius: 8px;
+          font-size: 13px;
+          color: #fff;
+        }
+        .media-chip-remove {
+          background: none;
+          border: none;
+          color: #888;
+          cursor: pointer;
+          padding: 0 2px;
+          font-size: 16px;
+          line-height: 1;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .media-chip-remove:hover {
+          color: #fff;
+        }
+        .add-media-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+        .add-media-row select {
+          flex: 1;
+          min-width: 160px;
+          padding: 10px 14px;
+          background: #111;
+          border: 2px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+        }
+        .volume-slider-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .volume-slider-row input[type="range"] {
+          flex: 1;
+          height: 8px;
+          -webkit-appearance: none;
+          appearance: none;
+          background: #333;
+          border-radius: 4px;
+        }
+        .volume-slider-row input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 20px;
+          height: 20px;
+          background: #06C167;
+          border-radius: 50%;
+          cursor: pointer;
+        }
+        .volume-value {
+          min-width: 48px;
+          font-size: 14px;
+          color: #888;
+          text-align: right;
+        }
+        .driver-nearby-block {
+          margin-top: 20px;
+          padding-top: 20px;
+          border-top: 1px solid #333;
+        }
+        .driver-nearby-title {
+          font-size: 14px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          color: #fff;
+        }
+        .driver-nearby-block .tts-field {
+          margin-bottom: 12px;
+        }
+        .driver-nearby-block input[type="number"] {
+          width: 100%;
+          max-width: 120px;
+          padding: 10px 14px;
+          background: #111;
+          border: 2px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+        }
       </style>
     `;
   }
@@ -1079,23 +1314,21 @@ class UberEatsPanel extends HTMLElement {
     const mapUrl = this._getMapUrl(lat, lon);
     const mapLabel = isActive && !noDriver ? "📍 Driver Location" : "🏠 Home";
 
-    const orderStatusDisplay = this._displayOrderStatus(account);
+    // One-line: Restaurant Name, Driver name, ETA (with inline labels). Timeline summary below.
+    const timelineSummary = (account.order_status || account.order_status_description || "").trim();
+    const timelineDisplay = timelineSummary && timelineSummary !== "Unknown" && timelineSummary !== "No Active Order"
+      ? timelineSummary
+      : this._displayOrderStatus(account);
     const driverDisplay = noDriver ? "Not assigned" : account.driver_name;
-    const driverStreet = account.driver_location?.street;
-    const locationDisplay = noDriver
-      ? "None yet"
-      : driverStreet && driverStreet !== "Unknown" && driverStreet !== "Home"
-        ? driverStreet
-        : "None yet";
-
     const etaDisplay =
       account.driver_eta && account.driver_eta !== "No ETA" && account.driver_eta !== "No ETA Available"
         ? account.driver_eta
         : "—";
-    const ettDisplay =
-      account.minutes_remaining != null && account.minutes_remaining !== ""
-        ? `${account.minutes_remaining} min`
-        : "—";
+
+    // Stage progress (4 segments: preparing → picked up → en route → arriving)
+    const cardStages = ["preparing", "picked up", "en route", "arriving"];
+    const cardStageIdx = cardStages.findIndex(s => (account.order_stage || "").toLowerCase().includes(s));
+    const safeStageIdx = cardStageIdx >= 0 ? cardStageIdx : (isActive ? 0 : -1);
 
     return `
       <div class="${cardClass}" data-entry-id="${account.entry_id}">
@@ -1110,35 +1343,26 @@ class UberEatsPanel extends HTMLElement {
             
             <div class="card-details">
               ${isActive ? `
-                <div class="detail-item">
-                  <span class="detail-label">Order Status</span>
-                  <span class="detail-value">${orderStatusDisplay}</span>
+                <div class="card-oneline">
+                  <span class="card-oneline-label">Restaurant Name:</span>
+                  <span class="card-oneline-value">${account.restaurant_name || "—"}</span>
+                  <span class="card-oneline-sep">·</span>
+                  <span class="card-oneline-label">Driver name:</span>
+                  <span class="card-oneline-value">${driverDisplay}</span>
+                  <span class="card-oneline-sep">·</span>
+                  <span class="card-oneline-label">ETA:</span>
+                  <span class="card-oneline-value">${etaDisplay}</span>
                 </div>
-                <div class="detail-item">
-                  <span class="detail-label">Restaurant</span>
-                  <span class="detail-value">${account.restaurant_name}</span>
-                </div>
-                <div class="detail-item">
-                  <span class="detail-label">Driver</span>
-                  <span class="detail-value">${driverDisplay}</span>
-                </div>
-                <div class="detail-item">
-                  <span class="detail-label">Location</span>
-                  <span class="detail-value">${locationDisplay}</span>
-                </div>
-                <div class="detail-item">
-                  <span class="detail-label">ETA</span>
-                  <span class="detail-value">${etaDisplay}</span>
-                </div>
-                <div class="detail-item">
-                  <span class="detail-label">ETT</span>
-                  <span class="detail-value">${ettDisplay}</span>
+                <div class="card-timeline">${timelineDisplay}</div>
+                <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
+                  ${cardStages.map((_, i) => {
+                    const completed = i < safeStageIdx;
+                    const current = i === safeStageIdx;
+                    return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
+                  }).join("")}
                 </div>
               ` : `
-                <div class="detail-item" style="grid-column: span 2;">
-                  <span class="detail-label">Status</span>
-                  <span class="detail-value" style="color: #888;">Waiting for orders...</span>
-                </div>
+                <div class="card-timeline" style="color: #888;">Waiting for orders...</div>
               `}
             </div>
           </div>
@@ -1434,49 +1658,131 @@ class UberEatsPanel extends HTMLElement {
       tts_entity_id: "",
       tts_media_players: [],
       tts_message_prefix: "Message from Uber Eats",
+      tts_volume: 0.5,
+      tts_interval_enabled: false,
+      tts_interval_minutes: 10,
+      driver_nearby_automation_enabled: false,
+      driver_nearby_automation_entity: "",
+      driver_nearby_distance_feet: 200,
     };
     const enabled = !!settings.tts_enabled;
     const ttsList = this._ttsEntities?.tts_entities || [];
     const mediaList = this._ttsEntities?.media_player_entities || [];
     const selectedMedia = Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [];
     const prefix = settings.tts_message_prefix || "Message from Uber Eats";
+    const volume = typeof settings.tts_volume === "number" ? settings.tts_volume : 0.5;
+    const intervalEnabled = !!settings.tts_interval_enabled;
+    const intervalMinutes = Math.max(5, Math.min(15, parseInt(settings.tts_interval_minutes, 10) || 10));
+    const driverNearbyEnabled = !!settings.driver_nearby_automation_enabled;
+    const driverAutomationEntity = settings.driver_nearby_automation_entity || "";
+    const driverNearbyDistance = Math.max(50, Math.min(2000, parseInt(settings.driver_nearby_distance_feet, 10) || 200));
+    const automations = this._automations || [];
+    const collapsed = this._advancedSettingsCollapsed;
 
     const ttsOptions = ttsList.map((e) =>
       `<option value="${e.entity_id}" ${e.entity_id === settings.tts_entity_id ? "selected" : ""}>${e.name || e.entity_id}</option>`
     ).join("");
 
-    const mediaOptions = mediaList.map((e) =>
-      `<option value="${e.entity_id}" ${selectedMedia.includes(e.entity_id) ? "selected" : ""}>${e.name || e.entity_id}</option>`
+    const mediaAvailableToAdd = mediaList.filter((e) => !selectedMedia.includes(e.entity_id));
+    const mediaAddOptions = mediaAvailableToAdd.map((e) =>
+      `<option value="${e.entity_id}">${e.name || e.entity_id}</option>`
     ).join("");
 
+    const chipsHtml = selectedMedia.map((entityId) => {
+      const ent = mediaList.find((e) => e.entity_id === entityId);
+      const name = ent ? (ent.name || entityId) : entityId;
+      return `<span class="media-chip" data-entity-id="${entityId}">${esc(name)}<button type="button" class="media-chip-remove" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" aria-label="Remove">×</button></span>`;
+    }).join("");
+
+    const intervalMinOptions = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((m) =>
+      `<option value="${m}" ${m === intervalMinutes ? "selected" : ""}>${m} min</option>`
+    ).join("");
+
+    const automationOptions = automations.map((a) =>
+      `<option value="${a.entity_id}" ${a.entity_id === driverAutomationEntity ? "selected" : ""}>${this._escapeHtml(a.name || a.entity_id)}</option>`
+    ).join("");
+
+    const esc = (s) => this._escapeHtml(s);
+
     return `
-      <div class="tts-section">
-        <div class="section-title">TTS Notification Settings</div>
-        <div class="tts-toggle-row">
-          <label>Enable TTS notifications</label>
-          <div class="tts-toggle ${enabled ? "enabled" : ""}" id="tts-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${enabled}"><span class="tts-toggle-knob"></span></div>
+      <div class="advanced-settings-section tts-section ${collapsed ? "collapsed" : ""}" id="advanced-settings-card">
+        <div class="advanced-settings-header" id="advanced-settings-header" role="button" tabindex="0" aria-expanded="${!collapsed}">
+          <span class="section-title">Advanced settings</span>
+          <svg class="collapse-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
-        <div class="tts-fields">
-          <div class="tts-field ${enabled ? "" : "disabled"}">
-            <label>TTS Engine</label>
-            <select id="tts-entity-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
-              <option value="">Select TTS engine...</option>
-              ${ttsOptions}
-            </select>
+        <div class="advanced-settings-body">
+          <div class="tts-toggle-row">
+            <label>Enable TTS notifications</label>
+            <div class="tts-toggle ${enabled ? "enabled" : ""}" id="tts-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${enabled}"><span class="tts-toggle-knob"></span></div>
           </div>
-          <div class="tts-field ${enabled ? "" : "disabled"}">
-            <label>Media Players (hold Ctrl/Cmd to select multiple)</label>
-            <select id="tts-media-select" class="tts-multi-select" multiple data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
-              ${mediaOptions}
-            </select>
-          </div>
-          <div class="tts-field ${enabled ? "" : "disabled"}">
-            <label>Message Prefix</label>
-            <input type="text" id="tts-prefix-input" value="${prefix.replace(/"/g, "&quot;")}" placeholder="Message from Uber Eats" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
+          <div class="tts-fields">
+            <div class="tts-field ${enabled ? "" : "disabled"}">
+              <label>TTS Engine</label>
+              <select id="tts-entity-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
+                <option value="">Select TTS engine...</option>
+                ${ttsOptions}
+              </select>
+            </div>
+            <div class="tts-field ${enabled ? "" : "disabled"}">
+              <label>Media Players</label>
+              <div class="media-players-chips" id="media-players-chips">${chipsHtml}</div>
+              <div class="add-media-row">
+                <select id="tts-media-add-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
+                  <option value="">Add media player...</option>
+                  ${mediaAddOptions}
+                </select>
+              </div>
+            </div>
+            <div class="tts-field ${enabled ? "" : "disabled"}">
+              <label>Message Prefix</label>
+              <input type="text" id="tts-prefix-input" value="${esc(prefix)}" placeholder="Message from Uber Eats" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
+            </div>
+            <div class="tts-field ${enabled ? "" : "disabled"}">
+              <label>TTS Volume</label>
+              <div class="volume-slider-row">
+                <input type="range" id="tts-volume-slider" min="0" max="1" step="0.05" value="${volume}" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
+                <span class="volume-value" id="tts-volume-value">${Math.round(volume * 100)}%</span>
+              </div>
+            </div>
+            <div class="tts-toggle-row">
+              <label>Send interval updates (every N minutes)</label>
+              <div class="tts-toggle ${intervalEnabled ? "enabled" : ""}" id="tts-interval-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${intervalEnabled}"><span class="tts-toggle-knob"></span></div>
+            </div>
+            <div class="tts-field ${intervalEnabled ? "" : "disabled"}">
+              <label>Interval (minutes)</label>
+              <select id="tts-interval-minutes" data-entry-id="${acc.entry_id}" ${intervalEnabled ? "" : "disabled"}>
+                ${intervalMinOptions}
+              </select>
+            </div>
+            <div class="driver-nearby-block">
+              <div class="driver-nearby-title">Driver nearby action</div>
+              <div class="tts-toggle-row">
+                <label>Trigger automation when driver is within distance</label>
+                <div class="tts-toggle ${driverNearbyEnabled ? "enabled" : ""}" id="driver-nearby-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${driverNearbyEnabled}"><span class="tts-toggle-knob"></span></div>
+              </div>
+              <div class="tts-field ${driverNearbyEnabled ? "" : "disabled"}">
+                <label>Distance (feet)</label>
+                <input type="number" id="driver-nearby-distance" min="50" max="2000" value="${driverNearbyDistance}" data-entry-id="${acc.entry_id}" ${driverNearbyEnabled ? "" : "disabled"} />
+              </div>
+              <div class="tts-field ${driverNearbyEnabled ? "" : "disabled"}">
+                <label>Automation</label>
+                <select id="driver-nearby-automation" data-entry-id="${acc.entry_id}" ${driverNearbyEnabled ? "" : "disabled"}>
+                  <option value="">Select automation...</option>
+                  ${automationOptions}
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     `;
+  }
+
+  _escapeHtml(s) {
+    if (s == null) return "";
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
   }
 
   _toggleSidebar() {
@@ -1551,18 +1857,29 @@ class UberEatsPanel extends HTMLElement {
       });
     }
 
+    // Advanced settings collapsible
+    const advancedHeader = this.shadowRoot.querySelector("#advanced-settings-header");
+    if (advancedHeader) {
+      const toggleCollapse = () => {
+        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
+        this._render();
+      };
+      advancedHeader.addEventListener("click", toggleCollapse);
+      advancedHeader.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleCollapse();
+        }
+      });
+    }
+
     // TTS toggle
     const ttsToggle = this.shadowRoot.querySelector("#tts-toggle");
     if (ttsToggle) {
       const entryId = ttsToggle.dataset.entryId;
       const toggleHandler = () => {
         const nextEnabled = !this._ttsSettings?.tts_enabled;
-        const settings = {
-          tts_enabled: nextEnabled,
-          tts_entity_id: this._ttsSettings?.tts_entity_id || "",
-          tts_media_players: this._ttsSettings?.tts_media_players || [],
-          tts_message_prefix: this._ttsSettings?.tts_message_prefix || "Message from Uber Eats",
-        };
+        const settings = { ...this._ttsSettings, tts_enabled: nextEnabled };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       };
       ttsToggle.addEventListener("click", toggleHandler);
@@ -1579,23 +1896,37 @@ class UberEatsPanel extends HTMLElement {
     if (ttsEntitySelect) {
       ttsEntitySelect.addEventListener("change", () => {
         const entryId = ttsEntitySelect.dataset.entryId;
-        const settings = { ...this._ttsSettings };
-        settings.tts_entity_id = ttsEntitySelect.value || "";
+        const settings = { ...this._ttsSettings, tts_entity_id: ttsEntitySelect.value || "" };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       });
     }
 
-    // TTS media select (multi)
-    const ttsMediaSelect = this.shadowRoot.querySelector("#tts-media-select");
-    if (ttsMediaSelect) {
-      ttsMediaSelect.addEventListener("change", () => {
-        const entryId = ttsMediaSelect.dataset.entryId;
-        const selected = Array.from(ttsMediaSelect.selectedOptions).map((o) => o.value);
-        const settings = { ...this._ttsSettings };
-        settings.tts_media_players = selected;
+    // Add media player (single select)
+    const ttsMediaAddSelect = this.shadowRoot.querySelector("#tts-media-add-select");
+    if (ttsMediaAddSelect) {
+      ttsMediaAddSelect.addEventListener("change", () => {
+        const val = ttsMediaAddSelect.value;
+        if (!val) return;
+        const entryId = ttsMediaAddSelect.dataset.entryId;
+        const current = Array.isArray(this._ttsSettings?.tts_media_players) ? this._ttsSettings.tts_media_players : [];
+        if (current.includes(val)) return;
+        const settings = { ...this._ttsSettings, tts_media_players: [...current, val] };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       });
     }
+
+    // Remove media player (chip remove buttons)
+    this.shadowRoot.querySelectorAll(".media-chip-remove").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const entityId = btn.dataset.entityId;
+        const entryId = btn.dataset.entryId;
+        const current = Array.isArray(this._ttsSettings?.tts_media_players) ? this._ttsSettings.tts_media_players : [];
+        const settings = { ...this._ttsSettings, tts_media_players: current.filter((id) => id !== entityId) };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    });
 
     // TTS prefix input
     const ttsPrefixInput = this.shadowRoot.querySelector("#tts-prefix-input");
@@ -1605,11 +1936,98 @@ class UberEatsPanel extends HTMLElement {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           const entryId = ttsPrefixInput.dataset.entryId;
-          const settings = { ...this._ttsSettings };
-          settings.tts_message_prefix = ttsPrefixInput.value || "Message from Uber Eats";
+          const settings = { ...this._ttsSettings, tts_message_prefix: ttsPrefixInput.value || "Message from Uber Eats" };
           this._saveTtsSettings(entryId, settings).then(() => this._render());
         }, 400);
       });
+    }
+
+    // TTS volume slider
+    const ttsVolumeSlider = this.shadowRoot.querySelector("#tts-volume-slider");
+    const ttsVolumeValue = this.shadowRoot.querySelector("#tts-volume-value");
+    if (ttsVolumeSlider) {
+      const saveVolume = () => {
+        const v = parseFloat(ttsVolumeSlider.value, 10);
+        const entryId = ttsVolumeSlider.dataset.entryId;
+        const settings = { ...this._ttsSettings, tts_volume: v };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      ttsVolumeSlider.addEventListener("input", () => {
+        if (ttsVolumeValue) ttsVolumeValue.textContent = Math.round(parseFloat(ttsVolumeSlider.value, 10) * 100) + "%";
+      });
+      ttsVolumeSlider.addEventListener("change", saveVolume);
+    }
+
+    // Interval toggle
+    const intervalToggle = this.shadowRoot.querySelector("#tts-interval-toggle");
+    if (intervalToggle) {
+      const entryId = intervalToggle.dataset.entryId;
+      const toggleHandler = () => {
+        const next = !this._ttsSettings?.tts_interval_enabled;
+        const settings = { ...this._ttsSettings, tts_interval_enabled: next };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      intervalToggle.addEventListener("click", toggleHandler);
+      intervalToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleHandler();
+        }
+      });
+    }
+
+    // Interval minutes
+    const intervalMinutesSelect = this.shadowRoot.querySelector("#tts-interval-minutes");
+    if (intervalMinutesSelect) {
+      intervalMinutesSelect.addEventListener("change", () => {
+        const entryId = intervalMinutesSelect.dataset.entryId;
+        const minutes = parseInt(intervalMinutesSelect.value, 10) || 10;
+        const settings = { ...this._ttsSettings, tts_interval_minutes: minutes };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    }
+
+    // Driver nearby toggle
+    const driverNearbyToggle = this.shadowRoot.querySelector("#driver-nearby-toggle");
+    if (driverNearbyToggle) {
+      const entryId = driverNearbyToggle.dataset.entryId;
+      const toggleHandler = () => {
+        const next = !this._ttsSettings?.driver_nearby_automation_enabled;
+        const settings = { ...this._ttsSettings, driver_nearby_automation_enabled: next };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      driverNearbyToggle.addEventListener("click", toggleHandler);
+      driverNearbyToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleHandler();
+        }
+      });
+    }
+
+    // Driver nearby automation select
+    const driverNearbyAutomation = this.shadowRoot.querySelector("#driver-nearby-automation");
+    if (driverNearbyAutomation) {
+      driverNearbyAutomation.addEventListener("change", () => {
+        const entryId = driverNearbyAutomation.dataset.entryId;
+        const settings = { ...this._ttsSettings, driver_nearby_automation_entity: driverNearbyAutomation.value || "" };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    }
+
+    // Driver nearby distance (feet)
+    const driverNearbyDistanceInput = this.shadowRoot.querySelector("#driver-nearby-distance");
+    if (driverNearbyDistanceInput) {
+      const saveDistance = () => {
+        const v = parseInt(driverNearbyDistanceInput.value, 10);
+        if (Number.isNaN(v)) return;
+        const clamped = Math.max(50, Math.min(2000, v));
+        const entryId = driverNearbyDistanceInput.dataset.entryId;
+        const settings = { ...this._ttsSettings, driver_nearby_distance_feet: clamped };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      };
+      driverNearbyDistanceInput.addEventListener("change", saveDistance);
+      driverNearbyDistanceInput.addEventListener("blur", saveDistance);
     }
   }
 }

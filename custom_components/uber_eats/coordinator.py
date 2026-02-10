@@ -12,7 +12,16 @@ from .const import (
     CONF_TTS_ENTITY_ID,
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
+    CONF_TTS_VOLUME,
+    CONF_TTS_INTERVAL_ENABLED,
+    CONF_TTS_INTERVAL_MINUTES,
+    CONF_DRIVER_NEARBY_AUTOMATION_ENABLED,
+    CONF_DRIVER_NEARBY_AUTOMATION_ENTITY,
+    CONF_DRIVER_NEARBY_DISTANCE_FEET,
     DEFAULT_TTS_MESSAGE_PREFIX,
+    DEFAULT_DRIVER_NEARBY_DISTANCE_FEET,
+    DEFAULT_TTS_VOLUME,
+    DEFAULT_TTS_INTERVAL_MINUTES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +45,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self.hass = hass
         self._order_history = []  # Per-account history
         self._previous_data = None  # Set on first update
+        self._last_interval_tts_time = None  # For interval TTS when driver assigned
+        self._last_driver_nearby_triggered = False  # For 200 ft automation trigger
         super().__init__(
             hass,
             _LOGGER,
@@ -259,6 +270,20 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             f"?bbox={min_lon}%2C{min_lat}%2C{max_lon}%2C{max_lat}&layer=mapnik&marker={lat}%2C{lon}"
         )
 
+    @staticmethod
+    def _distance_feet(lat1, lon1, lat2, lon2):
+        """Haversine distance in feet between two lat/lon points."""
+        if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+            return None
+        import math
+        R = 6371000  # meters
+        to_rad = lambda x: x * math.pi / 180
+        d_lat = to_rad(lat2 - lat1)
+        d_lon = to_rad(lon2 - lon1)
+        a = math.sin(d_lat / 2) ** 2 + math.cos(to_rad(lat1)) * math.cos(to_rad(lat2)) * math.sin(d_lon / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return (R * c) * 3.28084  # meters to feet
+
     def _process_tts_events(self, current_data):
         """Detect order events and send TTS if enabled. Fire-and-forget."""
         from . import tts_notifications
@@ -276,39 +301,18 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         tts_entity = options.get(CONF_TTS_ENTITY_ID, "").strip()
         media_players = options.get(CONF_TTS_MEDIA_PLAYERS, [])
         prefix = options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX) or DEFAULT_TTS_MESSAGE_PREFIX
+        volume = float(options.get(CONF_TTS_VOLUME, DEFAULT_TTS_VOLUME))
+        interval_enabled = options.get(CONF_TTS_INTERVAL_ENABLED, False)
+        interval_minutes = max(5, min(15, int(options.get(CONF_TTS_INTERVAL_MINUTES, DEFAULT_TTS_INTERVAL_MINUTES))))
 
         if not media_players:
             return
 
-        home_lat = self.hass.config.latitude or 0.0
-        home_lon = self.hass.config.longitude or 0.0
-
         curr_with_status = dict(current_data)
-        curr_with_status["_display_status"] = tts_notifications._get_display_order_status(
-            current_data, home_lat, home_lon
-        )
-
-        def _dist():
-            lat = current_data.get("driver_location_lat")
-            lon = current_data.get("driver_location_lon")
-            if lat is None or lon is None or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
-                return None
-            if lat == "No Active Order" or lon == "No Active Order":
-                return None
-            return tts_notifications._distance_feet(float(lat), float(lon), home_lat, home_lon)
-
-        def _prev_dist():
-            lat = prev.get("driver_location_lat")
-            lon = prev.get("driver_location_lon")
-            if lat is None or lon is None or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
-                return None
-            if lat == "No Active Order" or lon == "No Active Order":
-                return None
-            return tts_notifications._distance_feet(float(lat), float(lon), home_lat, home_lon)
-
+        curr_active = current_data.get("active")
         messages_to_send = []
 
-        # 1. New order (only if restaurant name present)
+        # 1. New order: same logic as active order sensor — was off, now on (with restaurant for message)
         if not prev.get("active") and current_data.get("active"):
             rest = (current_data.get("restaurant_name") or "").strip()
             if rest and rest not in ("No Restaurant", "Unknown"):
@@ -318,65 +322,81 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 if msg:
                     messages_to_send.append(("new_order", msg))
 
-        # 2. Driver assigned / unassigned / reassigned
+        # 2. Driver assigned
         prev_driver = prev.get("driver_name", "No Driver Assigned")
         curr_driver = current_data.get("driver_name", "No Driver Assigned")
         had_driver = _has_driver(prev_driver)
         has_driver = _has_driver(curr_driver)
-
-        if had_driver and not has_driver:
-            msg = tts_notifications.build_message(
-                prefix, self.account_name, curr_with_status, "driver_unassigned", prev
-            )
-            if msg:
-                messages_to_send.append(("driver_unassigned", msg))
-        elif not had_driver and has_driver:
+        if not had_driver and has_driver:
             msg = tts_notifications.build_message(
                 prefix, self.account_name, curr_with_status, "driver_assigned"
             )
             if msg:
                 messages_to_send.append(("driver_assigned", msg))
-        elif had_driver and has_driver and prev_driver != curr_driver:
-            msg = tts_notifications.build_message(
-                prefix, self.account_name, curr_with_status, "driver_reassigned"
-            )
-            if msg:
-                messages_to_send.append(("driver_reassigned", msg))
+            if interval_enabled:
+                self._last_interval_tts_time = dt_util.utcnow()
+        if had_driver and not has_driver:
+            self._last_interval_tts_time = None
+            self._last_driver_nearby_triggered = False
 
-        # 3. Order status change (use order_status/timelineSummary from API)
+        # 3. Card timeline / order status change (order_status from API)
         prev_order_status = prev.get("order_status", "")
         curr_order_status = current_data.get("order_status", "")
-        if current_data.get("active") and curr_order_status and curr_order_status != prev_order_status:
+        if curr_active and curr_order_status and curr_order_status != prev_order_status:
             msg = tts_notifications.build_message(
                 prefix, self.account_name, curr_with_status, "status_change"
             )
             if msg:
                 messages_to_send.append(("status_change", msg))
 
-        # 4. Driver arriving (1000 ft) and 5. Driver arrived (300 ft)
-        curr_dist = _dist()
-        prev_dist_val = _prev_dist()
-        if curr_dist is not None and curr_dist <= 1000:
-            if prev_dist_val is None or prev_dist_val > 1000:
+        # 4. Interval update (when driver assigned, every N minutes)
+        if interval_enabled and has_driver and self._last_interval_tts_time:
+            now = dt_util.utcnow()
+            elapsed = (now - self._last_interval_tts_time).total_seconds()
+            if elapsed >= interval_minutes * 60:
                 msg = tts_notifications.build_message(
-                    prefix, self.account_name, curr_with_status, "driver_arriving"
+                    prefix, self.account_name, curr_with_status, "interval_update"
                 )
                 if msg:
-                    messages_to_send.append(("driver_arriving", msg))
-        if curr_dist is not None and curr_dist <= 300:
-            if prev_dist_val is None or prev_dist_val > 300:
-                msg = tts_notifications.build_message(
-                    prefix, self.account_name, curr_with_status, "driver_arrived"
-                )
-                if msg:
-                    messages_to_send.append(("driver_arrived", msg))
+                    messages_to_send.append(("interval_update", msg))
+                self._last_interval_tts_time = now
 
         for _event_type, message in messages_to_send:
             self.hass.async_create_task(
                 tts_notifications.send_tts_if_idle(
-                    self.hass, tts_entity, media_players, message, cache=False
+                    self.hass, tts_entity, media_players, message, cache=False, volume_level=volume
                 )
             )
+
+        # 5. Driver nearby action: trigger user-selected automation when within distance (once per approach)
+        driver_nearby_enabled = options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENABLED, False)
+        automation_entity = (options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENTITY) or "").strip()
+        distance_feet = max(50, min(2000, int(options.get(CONF_DRIVER_NEARBY_DISTANCE_FEET, DEFAULT_DRIVER_NEARBY_DISTANCE_FEET))))
+        reset_feet = distance_feet + 50  # allow re-trigger after driver leaves and comes back
+        if driver_nearby_enabled and automation_entity and automation_entity.startswith("automation.") and has_driver:
+            home_lat = self.hass.config.latitude or 0.0
+            home_lon = self.hass.config.longitude or 0.0
+            lat = current_data.get("driver_location_lat")
+            lon = current_data.get("driver_location_lon")
+            if lat is not None and lon is not None and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                dist_ft = self._distance_feet(float(lat), float(lon), home_lat, home_lon)
+                if dist_ft is not None:
+                    if dist_ft > reset_feet:
+                        self._last_driver_nearby_triggered = False
+                    elif dist_ft <= distance_feet and not self._last_driver_nearby_triggered:
+                        self._last_driver_nearby_triggered = True
+                        self.hass.async_create_task(
+                            self.hass.services.async_call(
+                                "automation",
+                                "trigger",
+                                {"skip_condition": False},
+                                target={"entity_id": automation_entity},
+                                blocking=False,
+                            )
+                        )
+        else:
+            if not has_driver:
+                self._last_driver_nearby_triggered = False
 
 
 __all__ = ["UberEatsCoordinator"]

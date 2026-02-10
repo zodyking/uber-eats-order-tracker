@@ -18,7 +18,16 @@ from .const import (
     CONF_TTS_ENTITY_ID,
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
+    CONF_TTS_VOLUME,
+    CONF_TTS_INTERVAL_ENABLED,
+    CONF_TTS_INTERVAL_MINUTES,
+    CONF_DRIVER_NEARBY_AUTOMATION_ENABLED,
+    CONF_DRIVER_NEARBY_AUTOMATION_ENTITY,
+    CONF_DRIVER_NEARBY_DISTANCE_FEET,
     DEFAULT_TTS_MESSAGE_PREFIX,
+    DEFAULT_DRIVER_NEARBY_DISTANCE_FEET,
+    DEFAULT_TTS_VOLUME,
+    DEFAULT_TTS_INTERVAL_MINUTES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +42,7 @@ def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_tts_entities)
     websocket_api.async_register_command(hass, websocket_get_tts_settings)
     websocket_api.async_register_command(hass, websocket_update_tts_settings)
+    websocket_api.async_register_command(hass, websocket_get_automations)
 
 
 @websocket_api.websocket_command(
@@ -339,6 +349,26 @@ async def websocket_get_tts_entities(
 
 @websocket_api.websocket_command(
     {
+        "type": "uber_eats/get_automations",
+    }
+)
+@websocket_api.async_response
+async def websocket_get_automations(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get all automation entities for driver-nearby dropdown."""
+    automations = []
+    for state in hass.states.async_all():
+        if state.entity_id.startswith("automation."):
+            automations.append({"entity_id": state.entity_id, "name": state.name or state.entity_id})
+    automations.sort(key=lambda x: (x["name"] or "").lower())
+    connection.send_result(msg["id"], {"automations": automations})
+
+
+@websocket_api.websocket_command(
+    {
         "type": "uber_eats/get_tts_settings",
         vol.Required("entry_id"): str,
     }
@@ -362,6 +392,12 @@ async def websocket_get_tts_settings(
         "tts_entity_id": options.get(CONF_TTS_ENTITY_ID, ""),
         "tts_media_players": options.get(CONF_TTS_MEDIA_PLAYERS, []),
         "tts_message_prefix": options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX),
+        "tts_volume": float(options.get(CONF_TTS_VOLUME, DEFAULT_TTS_VOLUME)),
+        "tts_interval_enabled": options.get(CONF_TTS_INTERVAL_ENABLED, False),
+        "tts_interval_minutes": int(options.get(CONF_TTS_INTERVAL_MINUTES, DEFAULT_TTS_INTERVAL_MINUTES)),
+        "driver_nearby_automation_enabled": options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENABLED, False),
+        "driver_nearby_automation_entity": options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENTITY, ""),
+        "driver_nearby_distance_feet": int(options.get(CONF_DRIVER_NEARBY_DISTANCE_FEET, DEFAULT_DRIVER_NEARBY_DISTANCE_FEET)),
     })
 
 
@@ -373,6 +409,12 @@ async def websocket_get_tts_settings(
         vol.Required("tts_entity_id"): str,
         vol.Required("tts_media_players"): list,
         vol.Required("tts_message_prefix"): str,
+        vol.Optional("tts_volume"): vol.Any(int, float),
+        vol.Optional("tts_interval_enabled"): bool,
+        vol.Optional("tts_interval_minutes"): int,
+        vol.Optional("driver_nearby_automation_enabled"): bool,
+        vol.Optional("driver_nearby_automation_entity"): str,
+        vol.Optional("driver_nearby_distance_feet"): int,
     }
 )
 @websocket_api.async_response
@@ -395,6 +437,18 @@ async def websocket_update_tts_settings(
         e for e in msg["tts_media_players"] if isinstance(e, str) and e.startswith("media_player.")
     ]
     options[CONF_TTS_MESSAGE_PREFIX] = (msg["tts_message_prefix"] or "").strip() or DEFAULT_TTS_MESSAGE_PREFIX
+    if "tts_volume" in msg and msg["tts_volume"] is not None:
+        options[CONF_TTS_VOLUME] = max(0.0, min(1.0, float(msg["tts_volume"])))
+    if "tts_interval_enabled" in msg and msg["tts_interval_enabled"] is not None:
+        options[CONF_TTS_INTERVAL_ENABLED] = bool(msg["tts_interval_enabled"])
+    if "tts_interval_minutes" in msg and msg["tts_interval_minutes"] is not None:
+        options[CONF_TTS_INTERVAL_MINUTES] = max(5, min(15, int(msg["tts_interval_minutes"])))
+    if "driver_nearby_automation_enabled" in msg and msg["driver_nearby_automation_enabled"] is not None:
+        options[CONF_DRIVER_NEARBY_AUTOMATION_ENABLED] = bool(msg["driver_nearby_automation_enabled"])
+    if "driver_nearby_automation_entity" in msg:
+        options[CONF_DRIVER_NEARBY_AUTOMATION_ENTITY] = (msg["driver_nearby_automation_entity"] or "").strip()
+    if "driver_nearby_distance_feet" in msg and msg["driver_nearby_distance_feet"] is not None:
+        options[CONF_DRIVER_NEARBY_DISTANCE_FEET] = max(50, min(2000, int(msg["driver_nearby_distance_feet"])))
 
     hass.config_entries.async_update_entry(entry, options=options)
     connection.send_result(msg["id"], {"success": True})
