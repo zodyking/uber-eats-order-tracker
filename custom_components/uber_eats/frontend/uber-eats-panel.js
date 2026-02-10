@@ -633,6 +633,7 @@ class UberEatsPanel extends HTMLElement {
           height: 100%;
           border: none;
           filter: grayscale(100%) invert(100%) contrast(90%);
+          pointer-events: none;
         }
         
         .map-overlay {
@@ -645,6 +646,7 @@ class UberEatsPanel extends HTMLElement {
           font-size: 12px;
           font-weight: 500;
           color: #06C167;
+          pointer-events: none;
         }
         
         /* Instructions Page */
