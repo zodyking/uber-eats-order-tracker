@@ -1366,6 +1366,7 @@ class UberEatsPanel extends HTMLElement {
                 <div class="card-timeline" style="color: #888;">Waiting for orders...</div>
               `}
             </div>
+            <button type="button" class="view-details-btn" data-entry-id="${account.entry_id}">View details →</button>
           </div>
           
           <div class="card-map">
@@ -1829,10 +1830,19 @@ class UberEatsPanel extends HTMLElement {
       backBtn.addEventListener("click", () => this._goBack());
     }
 
-    // Account cards: click on left (info) area opens account details; map stays interactive
+    // Account cards: whole card (except map) opens account details; explicit button is guaranteed
+    const viewDetailsBtns = this.shadowRoot.querySelectorAll(".view-details-btn");
+    viewDetailsBtns.forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const entryId = btn.dataset.entryId;
+        if (entryId) this._selectAccount(entryId);
+      });
+    });
     const cardInfos = this.shadowRoot.querySelectorAll(".account-card .card-info");
     cardInfos.forEach((info) => {
-      info.addEventListener("click", () => {
+      info.addEventListener("click", (e) => {
+        if (e.target.classList.contains("view-details-btn")) return;
         const card = info.closest(".account-card");
         if (card && card.dataset.entryId) this._selectAccount(card.dataset.entryId);
       });
