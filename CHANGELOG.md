@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## Version 1.3.1
+
+**Released:** February 9, 2026
+
+### Changed
+
+- **Panel – Account card:** Account name is now a clickable button (visually unchanged) that opens account details. Card clicks use event delegation so navigation works reliably after auto-refresh.
+- **Panel – Account card:** Removed the separate "View details" button.
+
+---
+
 ## Version 1.2.3
 
 **Released:** February 1, 2026

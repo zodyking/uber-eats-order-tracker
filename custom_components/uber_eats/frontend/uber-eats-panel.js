@@ -52,6 +52,7 @@ class UberEatsPanel extends HTMLElement {
 
   connectedCallback() {
     this._render();
+    this._attachCardClickDelegation();
   }
 
   disconnectedCallback() {
@@ -76,6 +77,17 @@ class UberEatsPanel extends HTMLElement {
       clearInterval(this._refreshInterval);
       this._refreshInterval = null;
     }
+  }
+
+  _attachCardClickDelegation() {
+    if (this._cardClickDelegationAttached) return;
+    this._cardClickDelegationAttached = true;
+    this.shadowRoot.addEventListener("click", (e) => {
+      const card = e.target.closest(".account-card");
+      if (!card || !card.dataset.entryId) return;
+      if (!this._hass) return;
+      this._selectAccount(card.dataset.entryId);
+    });
   }
 
   async _loadAccounts() {
@@ -1301,6 +1313,7 @@ class UberEatsPanel extends HTMLElement {
   }
 
   _renderAccountCard(account) {
+    const esc = (s) => this._escapeHtml(s ?? "");
     const isActive = account.active;
     const hasError = account.connection_status === "error";
     const cardClass = isActive ? "account-card has-order" : "account-card";
@@ -1336,7 +1349,7 @@ class UberEatsPanel extends HTMLElement {
         <div class="card-main">
           <div class="card-info">
             <div class="card-header">
-              <span class="account-name">${account.account_name}</span>
+              <button type="button" class="account-name" aria-label="View details for ${esc(account.account_name)}">${esc(account.account_name)}</button>
               <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
                 ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
               </span>
@@ -1366,7 +1379,6 @@ class UberEatsPanel extends HTMLElement {
                 <div class="card-timeline" style="color: #888;">Waiting for orders...</div>
               `}
             </div>
-            <button type="button" class="view-details-btn" data-entry-id="${account.entry_id}">View details →</button>
           </div>
           
           <div class="card-map">
@@ -1830,23 +1842,7 @@ class UberEatsPanel extends HTMLElement {
       backBtn.addEventListener("click", () => this._goBack());
     }
 
-    // Account cards: whole card (except map) opens account details; explicit button is guaranteed
-    const viewDetailsBtns = this.shadowRoot.querySelectorAll(".view-details-btn");
-    viewDetailsBtns.forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const entryId = btn.dataset.entryId;
-        if (entryId) this._selectAccount(entryId);
-      });
-    });
-    const cardInfos = this.shadowRoot.querySelectorAll(".account-card .card-info");
-    cardInfos.forEach((info) => {
-      info.addEventListener("click", (e) => {
-        if (e.target.classList.contains("view-details-btn")) return;
-        const card = info.closest(".account-card");
-        if (card && card.dataset.entryId) this._selectAccount(card.dataset.entryId);
-      });
-    });
+    // Account card clicks handled by delegation in _attachCardClickDelegation (persists across re-renders)
 
     // Reconfigure button
     const reconfigureBtn = this.shadowRoot.querySelector("#reconfigure-btn");
