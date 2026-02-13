@@ -94,8 +94,12 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     # Version from manifest for cache-busting so panel UI updates are picked up
     try:
         manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
-        with open(manifest_path, encoding="utf-8") as f:
-            _manifest = json.load(f)
+
+        def _load_manifest() -> dict:
+            with open(manifest_path, encoding="utf-8") as f:
+                return json.load(f)
+
+        _manifest = await hass.async_add_executor_job(_load_manifest)
         _panel_version = _manifest.get("version", "1.0.0")
     except Exception:
         _panel_version = "1.0.0"

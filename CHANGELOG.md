@@ -4,6 +4,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## Version 1.3.2
+
+**Released:** February 9, 2026
+
+### Changed
+
+- **Panel – Account name button:** Transparent background styling; direct click listener (same pattern as Edit Account) for reliable navigation to account details.
+- **Integration:** Manifest loading now uses async executor to avoid blocking the event loop.
+
+---
+
 ## Version 1.3.1
 
 **Released:** February 9, 2026

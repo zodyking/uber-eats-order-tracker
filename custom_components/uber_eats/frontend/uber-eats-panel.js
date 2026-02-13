@@ -86,6 +86,7 @@ class UberEatsPanel extends HTMLElement {
       const card = e.target.closest(".account-card");
       if (!card || !card.dataset.entryId) return;
       if (!this._hass) return;
+      e.preventDefault();
       this._selectAccount(card.dataset.entryId);
     });
   }
@@ -318,6 +319,7 @@ class UberEatsPanel extends HTMLElement {
     `;
 
     this._attachEventListeners();
+    this._attachCardClickDelegation();
   }
 
   _getStyles() {
@@ -515,6 +517,26 @@ class UberEatsPanel extends HTMLElement {
           font-size: 22px;
           font-weight: 600;
           color: #fff;
+        }
+        
+        button.account-name {
+          background: transparent;
+          border: none;
+          padding: 0;
+          margin: 0;
+          font: inherit;
+          color: inherit;
+          cursor: pointer;
+          appearance: none;
+          -webkit-appearance: none;
+        }
+        button.account-name:hover,
+        button.account-name:focus {
+          background: transparent;
+        }
+        button.account-name:focus-visible {
+          outline: 2px solid #06C167;
+          outline-offset: 2px;
         }
         
         .status-badge {
@@ -1349,7 +1371,7 @@ class UberEatsPanel extends HTMLElement {
         <div class="card-main">
           <div class="card-info">
             <div class="card-header">
-              <button type="button" class="account-name" aria-label="View details for ${esc(account.account_name)}">${esc(account.account_name)}</button>
+              <button type="button" class="account-name" data-entry-id="${account.entry_id}" aria-label="View details for ${esc(account.account_name)}">${esc(account.account_name)}</button>
               <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
                 ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
               </span>
@@ -1842,7 +1864,15 @@ class UberEatsPanel extends HTMLElement {
       backBtn.addEventListener("click", () => this._goBack());
     }
 
-    // Account card clicks handled by delegation in _attachCardClickDelegation (persists across re-renders)
+    // Account name buttons (main page - navigate to account details) - same pattern as Edit Account
+    this.shadowRoot.querySelectorAll("button.account-name").forEach((btn) => {
+      const entryId = btn.dataset.entryId;
+      if (!entryId) return;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (this._hass) this._selectAccount(entryId);
+      });
+    });
 
     // Reconfigure button
     const reconfigureBtn = this.shadowRoot.querySelector("#reconfigure-btn");
