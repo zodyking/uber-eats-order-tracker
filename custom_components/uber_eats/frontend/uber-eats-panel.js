@@ -795,6 +795,15 @@ class UberEatsPanel extends HTMLElement {
           font-style: italic;
           letter-spacing: 0.3px;
         }
+        .card-waiting-message::after {
+          content: '.';
+          animation: dots 1.5s steps(3, end) infinite;
+        }
+        @keyframes dots {
+          0%, 20% { content: '.'; }
+          40% { content: '..'; }
+          60%, 100% { content: '...'; }
+        }
         
         .card-error-message {
           font-size: 22px;
@@ -858,8 +867,8 @@ class UberEatsPanel extends HTMLElement {
         
         .map-overlay {
           position: absolute;
-          bottom: 12px;
-          left: 12px;
+          top: 12px;
+          right: 12px;
           z-index: 2;
           background: rgba(0,0,0,0.85);
           padding: 8px 14px;
@@ -2277,7 +2286,7 @@ class UberEatsPanel extends HTMLElement {
             ${hasError ? `
               <div class="card-error-message">Connection Error</div>
             ` : `
-              <div class="card-waiting-message">Waiting for orders...</div>
+              <div class="card-waiting-message">Waiting for orders</div>
             `}
           </div>
           <div class="card-map">
@@ -2508,8 +2517,10 @@ class UberEatsPanel extends HTMLElement {
       const playerLangEnabled = !!playerLang || (this._playerLangEnabled || {})[entityId];
       const playerOptsEnabled = Object.keys(playerOpts).length > 0 || (this._playerOptsEnabled || {})[entityId];
       const isExpanded = !!(this._expandedPlayers || {})[entityId];
-      // Per-player TTS engine (falls back to global)
-      const playerTtsEntity = playerSettings.tts_entity_id || settings.tts_entity_id || "";
+      // Per-player TTS engine - show what's actually saved (not global fallback for display)
+      const playerTtsEntitySaved = playerSettings.tts_entity_id || "";
+      // But for test button and actual use, fall back to global
+      const playerTtsEntityEffective = playerTtsEntitySaved || settings.tts_entity_id || "";
 
       return `
         <div class="media-player-item${isExpanded ? " expanded" : ""}" data-entity-id="${entityId}">
@@ -2529,9 +2540,9 @@ class UberEatsPanel extends HTMLElement {
             <div class="media-player-setting">
               <label>TTS Engine</label>
               <select class="player-tts-engine-select" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
-                <option value="">Select TTS engine...</option>
+                <option value="">—</option>
                 ${ttsList.map((e) =>
-                  `<option value="${e.entity_id}" ${e.entity_id === playerTtsEntity ? "selected" : ""}>${e.name || e.entity_id}</option>`
+                  `<option value="${e.entity_id}" ${e.entity_id === playerTtsEntitySaved ? "selected" : ""}>${e.name || e.entity_id}</option>`
                 ).join("")}
               </select>
             </div>
@@ -2556,7 +2567,7 @@ class UberEatsPanel extends HTMLElement {
               ${playerOptsEnabled ? `<textarea class="player-opts-editor" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" placeholder="voice: en_US-trump-high" ${enabled ? "" : "disabled"}>${esc(playerOptsYaml)}</textarea>` : ""}
             </div>
             <div class="media-player-setting test-row">
-              <button type="button" class="player-test-btn" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" ${enabled && playerTtsEntity ? "" : "disabled"}>
+              <button type="button" class="player-test-btn" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" ${enabled && playerTtsEntityEffective ? "" : "disabled"}>
                 <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
                 Test
               </button>
@@ -2772,6 +2783,8 @@ class UberEatsPanel extends HTMLElement {
       const date = this._escapeHtml(order.date || "");
       const subtotal = typeof order.subtotal === "number" ? `$${order.subtotal.toFixed(2)}` : "—";
       const deliveryFee = typeof order.delivery_fee === "number" ? `$${order.delivery_fee.toFixed(2)}` : "—";
+      const tax = typeof order.tax === "number" ? `$${order.tax.toFixed(2)}` : null;
+      const promotions = typeof order.promotions === "number" && order.promotions < 0 ? `-$${Math.abs(order.promotions).toFixed(2)}` : null;
       const total = typeof order.total === "number" ? `$${order.total.toFixed(2)}` : "—";
       // Clean address: remove empty fields (double commas, leading/trailing commas)
       const rawAddress = order.store_address || "—";
@@ -2800,6 +2813,18 @@ class UberEatsPanel extends HTMLElement {
               <span class="past-order-label">Delivery Fee</span>
               <span class="past-order-value">${deliveryFee}</span>
             </div>
+            ${tax ? `
+            <div class="past-order-row">
+              <span class="past-order-label">Tax</span>
+              <span class="past-order-value">${tax}</span>
+            </div>
+            ` : ""}
+            ${promotions ? `
+            <div class="past-order-row">
+              <span class="past-order-label">Promotions</span>
+              <span class="past-order-value">${promotions}</span>
+            </div>
+            ` : ""}
             <div class="past-order-row total">
               <span class="past-order-label">Total</span>
               <span class="past-order-value">${total}</span>

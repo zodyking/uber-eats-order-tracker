@@ -458,15 +458,24 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             checkout = fare_info.get("checkoutInfo", [])
                             subtotal = 0
                             delivery_fee = 0
+                            tax = 0
+                            promotions = 0  # Sum of all discounts/credits (negative value)
                             total_raw = fare_info.get("totalPrice", 0) / 100.0
 
                             for item in checkout:
                                 key = item.get("key", "")
+                                item_type = item.get("type", "")
                                 raw_val = item.get("rawValue", 0)
+                                
                                 if key == "eats_fare.subtotal":
                                     subtotal = raw_val
                                 elif "booking_fee" in key:
                                     delivery_fee = raw_val
+                                elif key == "eats.tax.base":
+                                    tax = raw_val
+                                elif item_type == "debit" and raw_val < 0:
+                                    # Sum all debits (promotions/discounts) - they have negative values
+                                    promotions += raw_val
                                 elif key == "eats_fare.total":
                                     total_raw = raw_val
 
@@ -499,6 +508,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                                 "completed_at": completed_at,
                                 "subtotal": subtotal,
                                 "delivery_fee": delivery_fee,
+                                "tax": tax,
+                                "promotions": promotions,  # Negative value for discounts/credits
                                 "total": total_raw,
                                 "store_address": store_address,
                                 "store_rating": store_info.get("rating"),
