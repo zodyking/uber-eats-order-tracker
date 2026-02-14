@@ -249,6 +249,11 @@ class UberEatsPanel extends HTMLElement {
         tts_media_players: [],
         tts_message_prefix: "Message from Uber Eats",
         tts_volume: 0.5,
+        tts_media_player_volumes: {},
+        tts_media_player_settings: {},
+        tts_cache: true,
+        tts_language: "",
+        tts_options: {},
         tts_interval_enabled: false,
         tts_interval_minutes: 10,
         driver_nearby_automation_enabled: false,
@@ -282,6 +287,7 @@ class UberEatsPanel extends HTMLElement {
       };
       if (settings.tts_volume != null) payload.tts_volume = settings.tts_volume;
       if (settings.tts_media_player_volumes != null) payload.tts_media_player_volumes = settings.tts_media_player_volumes;
+      if (settings.tts_media_player_settings != null) payload.tts_media_player_settings = settings.tts_media_player_settings;
       if (settings.tts_cache != null) payload.tts_cache = settings.tts_cache;
       if (settings.tts_language != null) payload.tts_language = settings.tts_language;
       if (settings.tts_options != null) payload.tts_options = settings.tts_options;
@@ -2457,6 +2463,7 @@ class UberEatsPanel extends HTMLElement {
       tts_message_prefix: "Message from Uber Eats",
       tts_volume: 0.5,
       tts_media_player_volumes: {},
+      tts_media_player_settings: {},
       tts_cache: true,
       tts_language: "",
       tts_options: {},
