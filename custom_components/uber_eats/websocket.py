@@ -21,6 +21,10 @@ from .const import (
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
     CONF_TTS_VOLUME,
+    CONF_TTS_MEDIA_PLAYER_VOLUMES,
+    CONF_TTS_CACHE,
+    CONF_TTS_LANGUAGE,
+    CONF_TTS_OPTIONS,
     CONF_TTS_INTERVAL_ENABLED,
     CONF_TTS_INTERVAL_MINUTES,
     CONF_DRIVER_NEARBY_AUTOMATION_ENABLED,
@@ -60,6 +64,8 @@ def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_tts_settings)
     websocket_api.async_register_command(hass, websocket_update_tts_settings)
     websocket_api.async_register_command(hass, websocket_get_automations)
+    websocket_api.async_register_command(hass, websocket_test_tts)
+    websocket_api.async_register_command(hass, websocket_get_past_orders)
 
 
 @websocket_api.websocket_command(
@@ -433,6 +439,10 @@ async def websocket_get_tts_settings(
         "tts_media_players": options.get(CONF_TTS_MEDIA_PLAYERS, []),
         "tts_message_prefix": options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX),
         "tts_volume": float(options.get(CONF_TTS_VOLUME, DEFAULT_TTS_VOLUME)),
+        "tts_media_player_volumes": options.get(CONF_TTS_MEDIA_PLAYER_VOLUMES, {}),
+        "tts_cache": options.get(CONF_TTS_CACHE, True),
+        "tts_language": options.get(CONF_TTS_LANGUAGE, ""),
+        "tts_options": options.get(CONF_TTS_OPTIONS, {}),
         "tts_interval_enabled": options.get(CONF_TTS_INTERVAL_ENABLED, False),
         "tts_interval_minutes": int(options.get(CONF_TTS_INTERVAL_MINUTES, DEFAULT_TTS_INTERVAL_MINUTES)),
         "driver_nearby_automation_enabled": options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENABLED, False),
@@ -450,6 +460,10 @@ async def websocket_get_tts_settings(
         vol.Required("tts_media_players"): list,
         vol.Required("tts_message_prefix"): str,
         vol.Optional("tts_volume"): vol.Any(int, float),
+        vol.Optional("tts_media_player_volumes"): dict,
+        vol.Optional("tts_cache"): bool,
+        vol.Optional("tts_language"): str,
+        vol.Optional("tts_options"): dict,
         vol.Optional("tts_interval_enabled"): bool,
         vol.Optional("tts_interval_minutes"): int,
         vol.Optional("driver_nearby_automation_enabled"): bool,
@@ -479,6 +493,22 @@ async def websocket_update_tts_settings(
     options[CONF_TTS_MESSAGE_PREFIX] = (msg["tts_message_prefix"] or "").strip() or DEFAULT_TTS_MESSAGE_PREFIX
     if "tts_volume" in msg and msg["tts_volume"] is not None:
         options[CONF_TTS_VOLUME] = max(0.0, min(1.0, float(msg["tts_volume"])))
+    if "tts_media_player_volumes" in msg and msg["tts_media_player_volumes"] is not None:
+        vols = {}
+        for k, v in (msg["tts_media_player_volumes"] or {}).items():
+            if isinstance(k, str) and k.startswith("media_player."):
+                vols[k] = max(0.0, min(1.0, float(v)))
+        options[CONF_TTS_MEDIA_PLAYER_VOLUMES] = vols
+    if "tts_cache" in msg and msg["tts_cache"] is not None:
+        options[CONF_TTS_CACHE] = bool(msg["tts_cache"])
+    if "tts_language" in msg:
+        options[CONF_TTS_LANGUAGE] = (msg["tts_language"] or "").strip()
+    if "tts_options" in msg:
+        raw_opts = msg["tts_options"]
+        if isinstance(raw_opts, dict):
+            options[CONF_TTS_OPTIONS] = {str(k): v for k, v in raw_opts.items()}
+        else:
+            options[CONF_TTS_OPTIONS] = {}
     if "tts_interval_enabled" in msg and msg["tts_interval_enabled"] is not None:
         options[CONF_TTS_INTERVAL_ENABLED] = bool(msg["tts_interval_enabled"])
     if "tts_interval_minutes" in msg and msg["tts_interval_minutes"] is not None:
@@ -492,3 +522,103 @@ async def websocket_update_tts_settings(
 
     hass.config_entries.async_update_entry(entry, options=options)
     connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "uber_eats/test_tts",
+        vol.Required("tts_entity_id"): str,
+        vol.Required("media_player_id"): str,
+        vol.Required("message"): str,
+        vol.Optional("volume_level"): vol.Any(int, float),
+        vol.Optional("cache"): bool,
+        vol.Optional("language"): str,
+        vol.Optional("options"): dict,
+    }
+)
+@websocket_api.async_response
+async def websocket_test_tts(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Test TTS: set volume then speak on a single media player."""
+    from homeassistant.const import ATTR_ENTITY_ID
+
+    tts_entity = (msg["tts_entity_id"] or "").strip()
+    media_player = (msg["media_player_id"] or "").strip()
+    message = (msg["message"] or "").strip()
+    volume = max(0.0, min(1.0, float(msg.get("volume_level", 0.5))))
+    cache = msg.get("cache", True)
+    language = (msg.get("language") or "").strip() or None
+    options = msg.get("options") or None
+
+    if not tts_entity or not media_player or not message:
+        connection.send_error(msg["id"], "invalid_input", "TTS entity, media player, and message are required.")
+        return
+
+    # 1. Volume set
+    try:
+        await hass.services.async_call(
+            "media_player",
+            "volume_set",
+            {ATTR_ENTITY_ID: media_player, "volume_level": volume},
+            blocking=True,
+        )
+    except Exception as e:
+        _LOGGER.warning("Test TTS volume set failed for %s: %s", media_player, e)
+
+    # 2. TTS speak
+    try:
+        speak_data: dict[str, Any] = {
+            "media_player_entity_id": media_player,
+            "message": message,
+            "cache": cache,
+        }
+        if language:
+            speak_data["language"] = language
+        if options and isinstance(options, dict):
+            speak_data["options"] = options
+        await hass.services.async_call(
+            "tts",
+            "speak",
+            speak_data,
+            target={"entity_id": tts_entity},
+            blocking=True,
+        )
+        connection.send_result(msg["id"], {"success": True})
+    except Exception as e:
+        _LOGGER.error("Test TTS speak failed: %s", e)
+        connection.send_error(msg["id"], "tts_failed", str(e))
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "uber_eats/get_past_orders",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_get_past_orders(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get past orders for an account by calling Uber Eats API."""
+    entry_id = msg["entry_id"]
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if not entry:
+        connection.send_error(msg["id"], "not_found", "Config entry not found")
+        return
+
+    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not coordinator:
+        connection.send_error(msg["id"], "no_coordinator", "Coordinator not loaded")
+        return
+
+    try:
+        orders = await coordinator.fetch_past_orders()
+        connection.send_result(msg["id"], {"orders": orders})
+    except Exception as e:
+        _LOGGER.error("Failed to fetch past orders: %s", e)
+        connection.send_error(msg["id"], "fetch_failed", str(e))

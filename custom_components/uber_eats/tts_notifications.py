@@ -88,6 +88,8 @@ async def _send_tts_to_one(
     message: str,
     volume_level: float,
     cache: bool,
+    language: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> None:
     """Set volume then send TTS to a single media player."""
     volume_level = max(0.0, min(1.0, volume_level))
@@ -101,10 +103,19 @@ async def _send_tts_to_one(
     except Exception as e:
         _LOGGER.warning("Volume set failed for %s: %s", media_player_id, e)
     try:
+        speak_data: dict[str, Any] = {
+            "media_player_entity_id": media_player_id,
+            "message": message,
+            "cache": cache,
+        }
+        if language:
+            speak_data["language"] = language
+        if options and isinstance(options, dict):
+            speak_data["options"] = options
         await hass.services.async_call(
             "tts",
             "speak",
-            {"media_player_entity_id": media_player_id, "message": message, **({"cache": True} if cache else {})},
+            speak_data,
             target={"entity_id": tts_entity},
             blocking=True,
         )
@@ -118,8 +129,11 @@ async def send_tts_if_idle(
     tts_entity_id: str,
     media_player_ids: list[str],
     message: str,
-    cache: bool = False,
+    cache: bool = True,
     volume_level: float = 0.5,
+    per_player_volumes: dict[str, float] | None = None,
+    language: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> bool:
     """Send TTS to each media player in parallel; volume_set before each. No idle check."""
     if not message or not message.strip():
@@ -132,7 +146,7 @@ async def send_tts_if_idle(
 
     tts_entity = (tts_entity_id or "").strip()
     if not tts_entity:
-        tts_entity = await _find_tts_entity(hass)
+        tts_entity = await _find_tts_entity(hass, language)
     if not tts_entity:
         _LOGGER.error("TTS skipped: no TTS entity configured or found")
         return False
@@ -142,10 +156,17 @@ async def send_tts_if_idle(
         _LOGGER.error("TTS skipped: no media players found: %s", media_player_ids)
         return False
 
+    ppv = per_player_volumes or {}
     msg = message.strip()
     await asyncio.gather(
         *[
-            _send_tts_to_one(hass, tts_entity, mp, msg, volume_level, cache)
+            _send_tts_to_one(
+                hass, tts_entity, mp, msg,
+                volume_level=ppv.get(mp, volume_level),
+                cache=cache,
+                language=language,
+                options=options,
+            )
             for mp in valid_players
         ]
     )

@@ -7,12 +7,17 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     ENDPOINT,
+    ENDPOINT_PAST_ORDERS,
     HEADERS_TEMPLATE,
     CONF_TTS_ENABLED,
     CONF_TTS_ENTITY_ID,
     CONF_TTS_MEDIA_PLAYERS,
     CONF_TTS_MESSAGE_PREFIX,
     CONF_TTS_VOLUME,
+    CONF_TTS_MEDIA_PLAYER_VOLUMES,
+    CONF_TTS_CACHE,
+    CONF_TTS_LANGUAGE,
+    CONF_TTS_OPTIONS,
     CONF_TTS_INTERVAL_ENABLED,
     CONF_TTS_INTERVAL_MINUTES,
     CONF_DRIVER_NEARBY_AUTOMATION_ENABLED,
@@ -264,6 +269,169 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             return "au"
         return "us"
 
+    async def fetch_past_orders(self):
+        """Fetch all past orders from the Uber Eats API (paginated), filtered to current year.
+        
+        Returns dict with:
+          - orders: list of order dicts (current year only)
+          - statistics: computed stats for current year
+        """
+        locale = self._get_locale_code(self.time_zone)
+        url = f"{ENDPOINT_PAST_ORDERS}?localeCode={locale}"
+        headers = dict(HEADERS_TEMPLATE)
+        headers["Cookie"] = f"sid={self.sid}"
+
+        all_orders = []
+        current_year = datetime.now().year
+        last_workflow_uuid = ""
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                while True:
+                    async with session.post(url, headers=headers, json={"lastWorkflowUUID": last_workflow_uuid}) as resp:
+                        if resp.status != 200:
+                            _LOGGER.error("Past orders API returned %s", resp.status)
+                            break
+                        data = await resp.json()
+                        orders_map = data.get("data", {}).get("ordersMap", {})
+                        meta = data.get("data", {}).get("meta", {})
+                        has_more = meta.get("hasMore", False)
+
+                        batch_orders = []
+                        for order_uuid, order_data in orders_map.items():
+                            base = order_data.get("baseEaterOrder", {})
+                            store_info = order_data.get("storeInfo", {})
+                            fare_info = order_data.get("fareInfo", {})
+
+                            # Extract from checkoutInfo
+                            checkout = fare_info.get("checkoutInfo", [])
+                            subtotal = 0
+                            delivery_fee = 0
+                            total_raw = fare_info.get("totalPrice", 0) / 100.0
+
+                            for item in checkout:
+                                key = item.get("key", "")
+                                raw_val = item.get("rawValue", 0)
+                                if key == "eats_fare.subtotal":
+                                    subtotal = raw_val
+                                elif "booking_fee" in key:
+                                    delivery_fee = raw_val
+                                elif key == "eats_fare.total":
+                                    total_raw = raw_val
+
+                            # Parse completed date and filter by current year
+                            completed_at = base.get("completedAt", "") or base.get("lastStateChangeAt", "")
+                            order_year = None
+                            date_formatted = ""
+                            if completed_at:
+                                try:
+                                    dt_obj = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+                                    order_year = dt_obj.year
+                                    date_formatted = dt_obj.strftime("%b %d, %Y")
+                                except Exception:
+                                    date_formatted = completed_at[:10] if len(completed_at) >= 10 else completed_at
+
+                            # Only include orders from current year
+                            if order_year != current_year:
+                                continue
+
+                            location = store_info.get("location", {})
+                            address_info = location.get("address", {})
+                            store_address = address_info.get("eaterFormattedAddress", "")
+
+                            batch_orders.append({
+                                "uuid": order_uuid,
+                                "store_uuid": store_info.get("uuid", ""),
+                                "restaurant_name": store_info.get("title", "Unknown"),
+                                "hero_image_url": store_info.get("heroImageUrl", ""),
+                                "date": date_formatted,
+                                "completed_at": completed_at,
+                                "subtotal": subtotal,
+                                "delivery_fee": delivery_fee,
+                                "total": total_raw,
+                                "store_address": store_address,
+                                "store_rating": store_info.get("rating"),
+                                "is_cancelled": base.get("isCancelled", False),
+                            })
+
+                        all_orders.extend(batch_orders)
+
+                        # Pagination: get last order UUID for next request
+                        if has_more and orders_map:
+                            # Get the last order UUID from the batch
+                            last_order = list(orders_map.values())[-1]
+                            last_workflow_uuid = last_order.get("baseEaterOrder", {}).get("uuid", "")
+                            if not last_workflow_uuid:
+                                break
+                        else:
+                            break
+
+            except Exception as e:
+                _LOGGER.error("Error fetching past orders: %s", e, exc_info=True)
+
+        # Sort by completed date descending
+        all_orders.sort(key=lambda o: o.get("completed_at", ""), reverse=True)
+
+        # Compute statistics from current year orders
+        statistics = self._compute_order_statistics(all_orders, current_year)
+
+        return {"orders": all_orders, "statistics": statistics}
+
+    def _compute_order_statistics(self, orders, year):
+        """Compute statistics from orders list."""
+        if not orders:
+            return {
+                "year": year,
+                "total_orders": 0,
+                "total_spent": 0,
+                "total_delivery_fees": 0,
+                "top_restaurants": [],
+            }
+
+        # Aggregate by restaurant
+        restaurant_stats = {}
+        total_spent = 0
+        total_delivery_fees = 0
+        total_orders = 0
+
+        for order in orders:
+            if order.get("is_cancelled"):
+                continue
+
+            total_orders += 1
+            total_spent += order.get("total", 0)
+            total_delivery_fees += order.get("delivery_fee", 0)
+
+            store_uuid = order.get("store_uuid", "")
+            store_name = order.get("restaurant_name", "Unknown")
+            order_total = order.get("total", 0)
+
+            if store_uuid:
+                if store_uuid not in restaurant_stats:
+                    restaurant_stats[store_uuid] = {
+                        "name": store_name,
+                        "order_count": 0,
+                        "total_spent": 0,
+                    }
+                restaurant_stats[store_uuid]["order_count"] += 1
+                restaurant_stats[store_uuid]["total_spent"] += order_total
+
+        # Get top 3 restaurants by order count
+        sorted_restaurants = sorted(
+            restaurant_stats.values(),
+            key=lambda r: r["order_count"],
+            reverse=True
+        )
+        top_restaurants = sorted_restaurants[:3]
+
+        return {
+            "year": year,
+            "total_orders": total_orders,
+            "total_spent": round(total_spent, 2),
+            "total_delivery_fees": round(total_delivery_fees, 2),
+            "top_restaurants": top_restaurants,
+        }
+
     def _parse_stage(self, feed_cards):
         if not feed_cards:
             return "No Active Order"
@@ -364,6 +532,10 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         media_players = options.get(CONF_TTS_MEDIA_PLAYERS, [])
         prefix = options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX) or DEFAULT_TTS_MESSAGE_PREFIX
         volume = float(options.get(CONF_TTS_VOLUME, DEFAULT_TTS_VOLUME))
+        per_player_volumes = options.get(CONF_TTS_MEDIA_PLAYER_VOLUMES, {})
+        tts_cache = options.get(CONF_TTS_CACHE, True)
+        tts_language = (options.get(CONF_TTS_LANGUAGE) or "").strip() or None
+        tts_options = options.get(CONF_TTS_OPTIONS) or None
         interval_enabled = options.get(CONF_TTS_INTERVAL_ENABLED, False)
         interval_minutes = max(5, min(15, int(options.get(CONF_TTS_INTERVAL_MINUTES, DEFAULT_TTS_INTERVAL_MINUTES))))
 
@@ -426,7 +598,11 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         for _event_type, message in messages_to_send:
             self.hass.async_create_task(
                 tts_notifications.send_tts_if_idle(
-                    self.hass, tts_entity, media_players, message, cache=False, volume_level=volume
+                    self.hass, tts_entity, media_players, message,
+                    cache=tts_cache, volume_level=volume,
+                    per_player_volumes=per_player_volumes,
+                    language=tts_language,
+                    options=tts_options,
                 )
             )
 

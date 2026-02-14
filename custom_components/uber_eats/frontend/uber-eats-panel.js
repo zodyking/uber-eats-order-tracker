@@ -36,6 +36,9 @@ class UberEatsPanel extends HTMLElement {
     this._automations = [];
     this._advancedSettingsCollapsed = true;
     this._integrationVersion = null;
+    this._pastOrders = [];
+    this._pastOrdersLoading = false;
+    this._accountStats = null;
   }
 
   set hass(hass) {
@@ -208,6 +211,8 @@ class UberEatsPanel extends HTMLElement {
         this._loadAutomations(),
       ]);
       this._render();
+      // Fetch past orders in background (non-blocking)
+      this._fetchPastOrders(entryId);
     }
   }
 
@@ -269,6 +274,10 @@ class UberEatsPanel extends HTMLElement {
         tts_message_prefix: settings.tts_message_prefix || "Message from Uber Eats",
       };
       if (settings.tts_volume != null) payload.tts_volume = settings.tts_volume;
+      if (settings.tts_media_player_volumes != null) payload.tts_media_player_volumes = settings.tts_media_player_volumes;
+      if (settings.tts_cache != null) payload.tts_cache = settings.tts_cache;
+      if (settings.tts_language != null) payload.tts_language = settings.tts_language;
+      if (settings.tts_options != null) payload.tts_options = settings.tts_options;
       if (settings.tts_interval_enabled != null) payload.tts_interval_enabled = settings.tts_interval_enabled;
       if (settings.tts_interval_minutes != null) payload.tts_interval_minutes = settings.tts_interval_minutes;
       if (settings.driver_nearby_automation_enabled != null) payload.driver_nearby_automation_enabled = settings.driver_nearby_automation_enabled;
@@ -285,6 +294,9 @@ class UberEatsPanel extends HTMLElement {
   _goBack() {
     this._selectedAccount = null;
     this._currentView = "main";
+    this._pastOrders = [];
+    this._pastOrdersLoading = false;
+    this._accountStats = null;
     this._render();
   }
 
@@ -292,29 +304,6 @@ class UberEatsPanel extends HTMLElement {
     if (!lat || !lon) return null;
     const delta = typeof zoomOrDelta === "number" && zoomOrDelta < 1 ? zoomOrDelta : (zoomOrDelta >= 17 ? 0.001 : zoomOrDelta >= 16 ? 0.0015 : 0.003);
     return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lon}`;
-  }
-
-  /** Build map URL with home, store, driver markers. Uses data URI with Leaflet for multi-marker. */
-  _getMultiMarkerMapUrl(account) {
-    const home = account.home_location || (this._hass?.config ? { lat: this._hass.config.latitude, lon: this._hass.config.longitude } : null);
-    const store = account.store_location;
-    const driver = account.driver_location_coords || (account.active && account.driver_location ? account.driver_location : null);
-    const points = [];
-    if (home && home.lat != null && home.lon != null) points.push({ lat: home.lat, lon: home.lon, type: "home" });
-    if (store && store.lat != null && store.lon != null) points.push({ lat: store.lat, lon: store.lon, type: "store" });
-    if (driver && driver.lat != null && driver.lon != null) points.push({ lat: driver.lat, lon: driver.lon, type: "driver" });
-    if (points.length === 0) return null;
-    const lats = points.map((p) => p.lat);
-    const lons = points.map((p) => p.lon);
-    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-    const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
-    const span = Math.max(0.002, Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons)) * 1.5);
-    const ptsB64 = btoa(unescape(encodeURIComponent(JSON.stringify(points))));
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\\/script></head><body style="margin:0;background:#111"><div id="m" style="width:100%;height:100%;min-height:180px"></div><script>
-var m=L.map('m',{center:[${centerLat},${centerLon}],zoom:14,zoomControl:false});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM'}).addTo(m);L.control.zoom({position:'topleft'}).addTo(m);
-var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURIComponent(escape(atob('${ptsB64}')))).forEach(function(p){L.marker([p.lat,p.lon],{icon:L.divIcon({html:'<div style="font-size:22px;line-height:1;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))">'+icons[p.type]+'</div>',className:'',iconSize:[24,24],iconAnchor:[12,24]})}).addTo(m);});
-<\\/script></body></html>`;
-    return "data:text/html;base64," + btoa(unescape(encodeURIComponent(html)));
   }
 
   /** Distance in feet between two lat/lon points (Haversine). */
@@ -531,7 +520,9 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
         .content {
           padding: 24px;
           max-width: 1000px;
+          width: 100%;
           margin: 0 auto;
+          box-sizing: border-box;
         }
         
         /* Main page: flex layout so footer sits at bottom */
@@ -981,7 +972,9 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
         .details-content {
           padding: 24px;
           max-width: 1000px;
+          width: 100%;
           margin: 0 auto;
+          box-sizing: border-box;
         }
         
         .details-grid {
@@ -1367,6 +1360,158 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
           display: grid;
           gap: 16px;
         }
+        .media-players-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          margin-bottom: 8px;
+        }
+        .media-player-item {
+          background: #111;
+          border-radius: 10px;
+          padding: 12px 14px;
+          border: 1px solid #333;
+        }
+        .media-player-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 8px;
+        }
+        .media-player-name {
+          font-size: 14px;
+          font-weight: 500;
+          color: #fff;
+        }
+        .media-player-volume label {
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #888;
+          margin-bottom: 4px;
+          display: block;
+        }
+        /* Checkbox-style enable field (matching HA dev tools) */
+        .tts-checkbox-field {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 14px 0;
+          border-top: 1px solid #333;
+        }
+        .tts-checkbox {
+          width: 18px;
+          height: 18px;
+          min-width: 18px;
+          margin-top: 2px;
+          accent-color: #06C167;
+          cursor: pointer;
+        }
+        .tts-checkbox-label {
+          flex: 1;
+        }
+        .tts-checkbox-label strong {
+          display: block;
+          font-size: 14px;
+          font-weight: 600;
+          color: #fff;
+          margin-bottom: 2px;
+        }
+        .tts-checkbox-label span {
+          font-size: 12px;
+          color: #888;
+          line-height: 1.4;
+        }
+        .tts-checkbox-content {
+          padding-left: 30px;
+          padding-bottom: 4px;
+        }
+        /* Options code editor area */
+        .tts-options-editor {
+          width: 100%;
+          min-height: 80px;
+          background: #0d1117;
+          color: #c9d1d9;
+          border: 1px solid #333;
+          border-radius: 8px;
+          padding: 12px;
+          font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+          font-size: 13px;
+          line-height: 1.5;
+          resize: vertical;
+          box-sizing: border-box;
+          tab-size: 2;
+        }
+        .tts-options-editor:focus {
+          outline: none;
+          border-color: #06C167;
+        }
+        .tts-options-editor::placeholder {
+          color: #555;
+        }
+        .tts-options-editor:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        /* Test TTS button */
+        .tts-test-section {
+          margin-top: 16px;
+          padding-top: 16px;
+          border-top: 1px solid #333;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .tts-test-msg {
+          flex: 1;
+          min-width: 200px;
+          padding: 10px 14px;
+          background: #111;
+          border: 1px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+        }
+        .tts-test-msg:focus {
+          outline: none;
+          border-color: #06C167;
+        }
+        .tts-test-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          background: #06C167;
+          color: #fff;
+          border: none;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s ease, opacity 0.15s ease;
+          white-space: nowrap;
+        }
+        .tts-test-btn:hover {
+          background: #05a357;
+        }
+        .tts-test-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .tts-test-btn svg {
+          width: 16px;
+          height: 16px;
+          fill: currentColor;
+        }
+        .tts-test-status {
+          font-size: 12px;
+          color: #888;
+          width: 100%;
+        }
+        .tts-test-status.success { color: #06C167; }
+        .tts-test-status.error { color: #dc3545; }
+
         .media-players-chips {
           display: flex;
           flex-wrap: wrap;
@@ -1388,9 +1533,11 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
         .media-chip-remove {
           background: none;
           border: none;
-          color: #888;
+          color: #666;
           cursor: pointer;
-          padding: 0 2px;
+          padding: 2px 6px;
+          font-size: 18px;
+          border-radius: 4px;
           font-size: 16px;
           line-height: 1;
           -webkit-tap-highlight-color: transparent;
@@ -1465,6 +1612,259 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
           color: #fff;
           font-size: 14px;
         }
+
+        /* Two-column layout for Account Details + Statistics */
+        .details-two-column {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 20px;
+          margin-bottom: 0;
+        }
+        @media (max-width: 768px) {
+          .details-two-column {
+            grid-template-columns: 1fr;
+          }
+        }
+        .details-two-column .details-section {
+          margin-bottom: 0;
+        }
+
+        /* Statistics Card */
+        .stats-section {
+          background: #1e1e1e;
+          border-radius: 12px;
+          padding: 20px;
+        }
+        .stats-loading, .stats-empty {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          padding: 30px 20px;
+          color: #888;
+          font-size: 14px;
+        }
+        .stats-overview {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        @media (max-width: 480px) {
+          .stats-overview {
+            grid-template-columns: 1fr;
+          }
+        }
+        .stat-item {
+          background: #111;
+          border-radius: 10px;
+          padding: 16px 12px;
+          text-align: center;
+          border: 1px solid #333;
+        }
+        .stat-value {
+          display: block;
+          font-size: 20px;
+          font-weight: 700;
+          color: #06C167;
+          margin-bottom: 4px;
+        }
+        .stat-label {
+          display: block;
+          font-size: 11px;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .top-restaurants {
+          margin-top: 16px;
+        }
+        .top-restaurants-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: #888;
+          margin-bottom: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .top-restaurant-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 12px;
+          background: #111;
+          border-radius: 8px;
+          margin-bottom: 8px;
+          border: 1px solid #222;
+        }
+        .top-restaurant-row:last-child {
+          margin-bottom: 0;
+        }
+        .top-restaurant-rank {
+          font-size: 20px;
+          line-height: 1;
+        }
+        .top-restaurant-info {
+          flex: 1;
+          min-width: 0;
+        }
+        .top-restaurant-name {
+          display: block;
+          font-size: 14px;
+          font-weight: 600;
+          color: #fff;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .top-restaurant-stats {
+          display: block;
+          font-size: 12px;
+          color: #888;
+          margin-top: 2px;
+        }
+
+        /* Past Orders Section */
+        .past-orders-section {
+          margin-top: 24px;
+          padding: 20px;
+          background: #1e1e1e;
+          border-radius: 12px;
+          box-sizing: border-box;
+        }
+        .past-orders-section .section-title {
+          font-size: 16px;
+          font-weight: 600;
+          margin-bottom: 16px;
+          color: #fff;
+        }
+        .past-orders-loading, .past-orders-empty {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          padding: 40px 20px;
+          color: #888;
+          font-size: 14px;
+        }
+        .loading-spinner {
+          width: 24px;
+          height: 24px;
+          border: 3px solid #333;
+          border-top-color: #06C167;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .past-orders-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          gap: 16px;
+        }
+        .past-order-card {
+          background: #111;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid #333;
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .past-order-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .past-order-card.cancelled {
+          opacity: 0.7;
+        }
+        .past-order-image-container {
+          width: 100%;
+          height: 140px;
+          overflow: hidden;
+          background: #222;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .past-order-image {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        .past-order-image-fallback {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 48px;
+          background: #222;
+          color: #444;
+        }
+        .past-order-name {
+          padding: 12px 14px 4px;
+          font-size: 15px;
+          font-weight: 600;
+          color: #fff;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .past-order-date {
+          padding: 0 14px 12px;
+          font-size: 12px;
+          color: #888;
+        }
+        .order-cancelled-badge {
+          background: #dc3545;
+          color: #fff;
+          font-size: 10px;
+          padding: 2px 6px;
+          border-radius: 4px;
+          margin-left: 6px;
+          text-transform: uppercase;
+          font-weight: 600;
+        }
+        .past-order-details {
+          padding: 0 14px 14px;
+          border-top: 1px solid #222;
+        }
+        .past-order-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          padding: 8px 0;
+          border-bottom: 1px solid #222;
+        }
+        .past-order-row:last-child {
+          border-bottom: none;
+        }
+        .past-order-row.total {
+          font-weight: 600;
+        }
+        .past-order-row.total .past-order-value {
+          color: #06C167;
+        }
+        .past-order-label {
+          font-size: 12px;
+          color: #888;
+          flex-shrink: 0;
+          margin-right: 12px;
+        }
+        .past-order-value {
+          font-size: 13px;
+          color: #fff;
+          text-align: right;
+          word-break: break-word;
+        }
+        .past-order-value.address {
+          font-size: 11px;
+          color: #aaa;
+          max-width: 150px;
+        }
+        .past-order-value.rating {
+          color: #ffc107;
+        }
       </style>
     `;
   }
@@ -1525,11 +1925,9 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
       account.driver_name === "No Driver Assigned" ||
       account.driver_name === "Unknown";
 
-    const mapUrl = this._getMultiMarkerMapUrl(account) || this._getMapUrl(
-      account.driver_location?.lat || this._hass?.config?.latitude || 0,
-      account.driver_location?.lon || this._hass?.config?.longitude || 0,
-      0.001
-    );
+    const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
+    const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
+    const mapUrl = this._getMapUrl(lat, lon, 0.001);
     const mapLabel = isActive && !noDriver ? "📍 Driver" : "🏠 Home";
 
     const timelineSummary = (account.order_status || account.order_status_description || "").trim();
@@ -1702,28 +2100,6 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
     const acc = this._selectedAccount;
     if (!acc) return "";
 
-    const isActive = acc.active;
-    const noDriver =
-      !acc.driver_name ||
-      acc.driver_name === "No Driver Assigned" ||
-      acc.driver_name === "Unknown";
-    const locationStreet = noDriver ? "None yet" : (acc.driver_location?.street || "—");
-    const locationSuburb = noDriver ? "—" : (acc.driver_location?.suburb || "—");
-    const lat = acc.driver_location?.lat ?? acc.home_location?.lat ?? 0;
-    const lon = acc.driver_location?.lon ?? acc.home_location?.lon ?? 0;
-      acc.driver_eta && acc.driver_eta !== "No ETA" && acc.driver_eta !== "No ETA Available"
-        ? acc.driver_eta
-        : "—";
-    const ettDisplay =
-      acc.minutes_remaining != null && acc.minutes_remaining !== ""
-        ? `${acc.minutes_remaining} min`
-        : "—";
-
-    const mapUrl = this._getMultiMarkerMapUrl(acc) || this._getMapUrl(
-      acc.driver_location?.lat || acc.home_location?.lat || 0,
-      acc.driver_location?.lon || acc.home_location?.lon || 0,
-      16
-    );
     const isConnected = acc.connection_status !== "error";
 
     return `
@@ -1743,18 +2119,7 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
         </div>
         
         <div class="details-content">
-          <div class="big-map">
-            ${mapUrl ? `
-              <iframe src="${mapUrl}" title="Location Map"></iframe>
-            ` : `
-              <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;">
-                Map unavailable
-              </div>
-            `}
-          </div>
-          
-          <div class="details-grid">
-            <!-- Account Details only (no Order Information) -->
+          <div class="details-two-column">
             <div class="details-section">
               <div class="section-title">Account Details</div>
               <div class="info-grid">
@@ -1775,30 +2140,14 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
                   <span class="info-value" style="font-family:monospace;font-size:11px;">${acc.entry_id?.substring(0, 12)}...</span>
                 </div>
               </div>
-              
-              ${isActive ? `
-                <div style="margin-top:20px;">
-                  <div class="section-title">Driver Location</div>
-                  <div class="info-grid">
-                    <div class="info-row">
-                      <span class="info-label">Street</span>
-                      <span class="info-value">${locationStreet}</span>
-                    </div>
-                    <div class="info-row">
-                      <span class="info-label">Suburb</span>
-                      <span class="info-value">${locationSuburb}</span>
-                    </div>
-                    <div class="info-row">
-                      <span class="info-label">Coordinates</span>
-                      <span class="info-value" style="font-family:monospace;font-size:12px;">${noDriver ? "—" : (typeof lat === "number" && typeof lon === "number" ? `${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}` : "—")}</span>
-                    </div>
-                  </div>
-                </div>
-              ` : ""}
             </div>
+            
+            ${this._renderStatisticsCard()}
           </div>
           
           ${this._renderTtsSection(acc)}
+          
+          ${this._renderPastOrdersSection(acc)}
           
           <div class="actions-row">
             <button class="btn btn-outline" id="reconfigure-btn" data-entry-id="${acc.entry_id}">Edit Account</button>
@@ -1817,6 +2166,10 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
       tts_media_players: [],
       tts_message_prefix: "Message from Uber Eats",
       tts_volume: 0.5,
+      tts_media_player_volumes: {},
+      tts_cache: true,
+      tts_language: "",
+      tts_options: {},
       tts_interval_enabled: false,
       tts_interval_minutes: 10,
       driver_nearby_automation_enabled: false,
@@ -1828,7 +2181,16 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
     const mediaList = this._ttsEntities?.media_player_entities || [];
     const selectedMedia = Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [];
     const prefix = settings.tts_message_prefix || "Message from Uber Eats";
-    const volume = typeof settings.tts_volume === "number" ? settings.tts_volume : 0.5;
+    const defaultVol = typeof settings.tts_volume === "number" ? settings.tts_volume : 0.5;
+    const perPlayerVols = settings.tts_media_player_volumes || {};
+    const ttsCache = settings.tts_cache !== false;
+    const ttsLanguage = settings.tts_language || "";
+    const ttsOptions = settings.tts_options || {};
+    const ttsOptionsYaml = Object.keys(ttsOptions).length > 0
+      ? Object.entries(ttsOptions).map(([k, v]) => `${k}: ${v}`).join("\n")
+      : "";
+    const langEnabled = !!ttsLanguage;
+    const optionsEnabled = Object.keys(ttsOptions).length > 0;
     const intervalEnabled = !!settings.tts_interval_enabled;
     const intervalMinutes = Math.max(5, Math.min(15, parseInt(settings.tts_interval_minutes, 10) || 10));
     const driverNearbyEnabled = !!settings.driver_nearby_automation_enabled;
@@ -1846,10 +2208,25 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
       `<option value="${e.entity_id}">${e.name || e.entity_id}</option>`
     ).join("");
 
-    const chipsHtml = selectedMedia.map((entityId) => {
+    // Each media player: chip with remove + its own volume slider
+    const mediaPlayersHtml = selectedMedia.map((entityId) => {
       const ent = mediaList.find((e) => e.entity_id === entityId);
       const name = ent ? (ent.name || entityId) : entityId;
-      return `<span class="media-chip" data-entity-id="${entityId}">${esc(name)}<button type="button" class="media-chip-remove" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" aria-label="Remove">×</button></span>`;
+      const vol = typeof perPlayerVols[entityId] === "number" ? perPlayerVols[entityId] : defaultVol;
+      return `
+        <div class="media-player-item" data-entity-id="${entityId}">
+          <div class="media-player-header">
+            <span class="media-player-name">${esc(name)}</span>
+            <button type="button" class="media-chip-remove" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" aria-label="Remove">×</button>
+          </div>
+          <div class="media-player-volume">
+            <label>Volume</label>
+            <div class="volume-slider-row">
+              <input type="range" class="player-volume-slider" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" min="0" max="1" step="0.05" value="${vol}" ${enabled ? "" : "disabled"} />
+              <span class="volume-value player-volume-value" data-entity-id="${entityId}">${Math.round(vol * 100)}%</span>
+            </div>
+          </div>
+        </div>`;
     }).join("");
 
     const intervalMinOptions = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((m) =>
@@ -1881,7 +2258,7 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
             </div>
             <div class="tts-field ${enabled ? "" : "disabled"}">
               <label>Media Players</label>
-              <div class="media-players-chips" id="media-players-chips">${chipsHtml}</div>
+              <div class="media-players-list" id="media-players-list">${mediaPlayersHtml}</div>
               <div class="add-media-row">
                 <select id="tts-media-add-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
                   <option value="">Add media player...</option>
@@ -1893,12 +2270,46 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
               <label>Message Prefix</label>
               <input type="text" id="tts-prefix-input" value="${esc(prefix)}" placeholder="Message from Uber Eats" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
             </div>
-            <div class="tts-field ${enabled ? "" : "disabled"}">
-              <label>TTS Volume</label>
-              <div class="volume-slider-row">
-                <input type="range" id="tts-volume-slider" min="0" max="1" step="0.05" value="${volume}" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
-                <span class="volume-value" id="tts-volume-value">${Math.round(volume * 100)}%</span>
+            <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
+              <div class="tts-toggle-row" style="width:100%">
+                <div style="flex:1">
+                  <strong style="color:#fff;font-size:14px">Cache</strong>
+                  <span style="font-size:12px;color:#888;display:block;margin-top:2px">Stores this message locally so that when the text is requested again, the output can be produced more quickly.</span>
+                </div>
+                <div class="tts-toggle ${ttsCache ? "enabled" : ""}" id="tts-cache-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${ttsCache}"><span class="tts-toggle-knob"></span></div>
               </div>
+            </div>
+            <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
+              <input type="checkbox" class="tts-checkbox" id="tts-language-checkbox" ${langEnabled ? "checked" : ""} ${enabled ? "" : "disabled"} />
+              <div class="tts-checkbox-label">
+                <strong>Language</strong>
+                <span>Language to use for speech generation.</span>
+              </div>
+            </div>
+            ${langEnabled ? `
+            <div class="tts-checkbox-content ${enabled ? "" : "disabled"}">
+              <input type="text" id="tts-language-input" value="${esc(ttsLanguage)}" placeholder="e.g. en, es, fr" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} style="width:100%;padding:10px 14px;background:#111;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px;box-sizing:border-box" />
+            </div>
+            ` : ""}
+            <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
+              <input type="checkbox" class="tts-checkbox" id="tts-options-checkbox" ${optionsEnabled ? "checked" : ""} ${enabled ? "" : "disabled"} />
+              <div class="tts-checkbox-label">
+                <strong>Options</strong>
+                <span>A dictionary containing integration-specific options (e.g. voice for Piper).</span>
+              </div>
+            </div>
+            ${optionsEnabled || ttsOptionsYaml ? `
+            <div class="tts-checkbox-content ${enabled ? "" : "disabled"}">
+              <textarea id="tts-options-editor" class="tts-options-editor" data-entry-id="${acc.entry_id}" placeholder="voice: en_US-trump-high" ${enabled ? "" : "disabled"}>${esc(ttsOptionsYaml)}</textarea>
+            </div>
+            ` : ""}
+            <div class="tts-test-section ${enabled ? "" : "disabled"}">
+              <input type="text" id="tts-test-message" class="tts-test-msg" placeholder="Test message..." value="This is a test from Uber Eats" ${enabled ? "" : "disabled"} />
+              <button type="button" id="tts-test-btn" class="tts-test-btn" ${enabled && selectedMedia.length > 0 && settings.tts_entity_id ? "" : "disabled"}>
+                <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                Test
+              </button>
+              <div id="tts-test-status" class="tts-test-status"></div>
             </div>
             <div class="tts-toggle-row">
               <label>Send interval updates (every N minutes)</label>
@@ -1939,6 +2350,210 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
     const div = document.createElement("div");
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  /** Parse simple YAML-like key: value lines into a dict. */
+  _parseYamlOptions(text) {
+    const result = {};
+    if (!text || !text.trim()) return result;
+    const lines = text.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx <= 0) continue;
+      const key = trimmed.substring(0, colonIdx).trim();
+      let val = trimmed.substring(colonIdx + 1).trim();
+      // Try to parse booleans and numbers
+      if (val === "true") val = true;
+      else if (val === "false") val = false;
+      else if (val !== "" && !isNaN(Number(val))) val = Number(val);
+      if (key) result[key] = val;
+    }
+    return result;
+  }
+
+  _renderStatisticsCard() {
+    const stats = this._accountStats;
+    const isLoading = this._pastOrdersLoading;
+
+    if (isLoading) {
+      return `
+        <div class="details-section stats-section">
+          <div class="section-title">Statistics (${new Date().getFullYear()})</div>
+          <div class="stats-loading">
+            <div class="loading-spinner"></div>
+            <span>Calculating...</span>
+          </div>
+        </div>
+      `;
+    }
+
+    if (!stats) {
+      return `
+        <div class="details-section stats-section">
+          <div class="section-title">Statistics (${new Date().getFullYear()})</div>
+          <div class="stats-empty">No data available</div>
+        </div>
+      `;
+    }
+
+    const year = stats.year || new Date().getFullYear();
+    const totalOrders = stats.total_orders || 0;
+    const totalSpent = typeof stats.total_spent === "number" ? `$${stats.total_spent.toFixed(2)}` : "$0.00";
+    const totalDeliveryFees = typeof stats.total_delivery_fees === "number" ? `$${stats.total_delivery_fees.toFixed(2)}` : "$0.00";
+    const topRestaurants = stats.top_restaurants || [];
+
+    const topRestaurantsHtml = topRestaurants.length > 0 
+      ? topRestaurants.map((r, idx) => {
+          const name = this._escapeHtml(r.name || "Unknown");
+          const orderCount = r.order_count || 0;
+          const spent = typeof r.total_spent === "number" ? `$${r.total_spent.toFixed(2)}` : "$0.00";
+          const medals = ["🥇", "🥈", "🥉"];
+          return `
+            <div class="top-restaurant-row">
+              <span class="top-restaurant-rank">${medals[idx] || (idx + 1)}</span>
+              <div class="top-restaurant-info">
+                <span class="top-restaurant-name">${name}</span>
+                <span class="top-restaurant-stats">${orderCount} order${orderCount !== 1 ? "s" : ""} · ${spent}</span>
+              </div>
+            </div>
+          `;
+        }).join("")
+      : `<div class="stats-empty">No orders yet</div>`;
+
+    return `
+      <div class="details-section stats-section">
+        <div class="section-title">Statistics (${year})</div>
+        
+        <div class="stats-overview">
+          <div class="stat-item">
+            <span class="stat-value">${totalOrders}</span>
+            <span class="stat-label">Total Deliveries</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">${totalSpent}</span>
+            <span class="stat-label">Total Spent</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">${totalDeliveryFees}</span>
+            <span class="stat-label">Delivery Fees</span>
+          </div>
+        </div>
+        
+        <div class="top-restaurants">
+          <div class="top-restaurants-title">Top Restaurants</div>
+          ${topRestaurantsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderPastOrdersSection(acc) {
+    const isLoading = this._pastOrdersLoading;
+    const orders = this._pastOrders || [];
+    const stats = this._accountStats;
+    const year = stats?.year || new Date().getFullYear();
+
+    if (isLoading) {
+      return `
+        <div class="past-orders-section">
+          <div class="section-title">Past Orders (${year})</div>
+          <div class="past-orders-loading">
+            <div class="loading-spinner"></div>
+            <span>Loading past orders...</span>
+          </div>
+        </div>
+      `;
+    }
+
+    if (orders.length === 0) {
+      return `
+        <div class="past-orders-section">
+          <div class="section-title">Past Orders (${year})</div>
+          <div class="past-orders-empty">
+            <span>No past orders found for ${year}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    const orderCardsHtml = orders.map((order) => {
+      const imgUrl = order.hero_image_url || "";
+      const name = this._escapeHtml(order.restaurant_name || "Unknown");
+      const date = this._escapeHtml(order.date || "");
+      const subtotal = typeof order.subtotal === "number" ? `$${order.subtotal.toFixed(2)}` : "—";
+      const deliveryFee = typeof order.delivery_fee === "number" ? `$${order.delivery_fee.toFixed(2)}` : "—";
+      const total = typeof order.total === "number" ? `$${order.total.toFixed(2)}` : "—";
+      const storeAddress = this._escapeHtml(order.store_address || "—");
+      const rating = order.store_rating != null ? `${order.store_rating} ★` : "—";
+      const isCancelled = order.is_cancelled;
+
+      return `
+        <div class="past-order-card${isCancelled ? " cancelled" : ""}">
+          <div class="past-order-image-container">
+            ${imgUrl ? `<img src="${imgUrl}" alt="${name}" class="past-order-image" loading="lazy" crossorigin="anonymous" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div class="past-order-image-fallback" style="display:none">🍔</div>` : `<div class="past-order-image-fallback">🍔</div>`}
+          </div>
+          <div class="past-order-name">${name}</div>
+          <div class="past-order-date">${date}${isCancelled ? ` <span class="order-cancelled-badge">Cancelled</span>` : ""}</div>
+          <div class="past-order-details">
+            <div class="past-order-row">
+              <span class="past-order-label">Subtotal</span>
+              <span class="past-order-value">${subtotal}</span>
+            </div>
+            <div class="past-order-row">
+              <span class="past-order-label">Delivery Fee</span>
+              <span class="past-order-value">${deliveryFee}</span>
+            </div>
+            <div class="past-order-row total">
+              <span class="past-order-label">Total</span>
+              <span class="past-order-value">${total}</span>
+            </div>
+            <div class="past-order-row">
+              <span class="past-order-label">Address</span>
+              <span class="past-order-value address">${storeAddress}</span>
+            </div>
+            <div class="past-order-row">
+              <span class="past-order-label">Rating</span>
+              <span class="past-order-value rating">${rating}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div class="past-orders-section">
+        <div class="section-title">Past Orders (${year})</div>
+        <div class="past-orders-grid">
+          ${orderCardsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  async _fetchPastOrders(entryId) {
+    if (!this._hass || !entryId) return;
+    this._pastOrdersLoading = true;
+    this._pastOrders = [];
+    this._accountStats = null;
+    this._render();
+
+    try {
+      const result = await this._hass.callWS({
+        type: "uber_eats/get_past_orders",
+        entry_id: entryId,
+      });
+      this._pastOrders = result.orders || [];
+      this._accountStats = result.statistics || null;
+    } catch (err) {
+      console.error("Failed to fetch past orders:", err);
+      this._pastOrders = [];
+      this._accountStats = null;
+    } finally {
+      this._pastOrdersLoading = false;
+      this._render();
+    }
   }
 
   _toggleSidebar() {
@@ -2094,7 +2709,9 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
         const entityId = btn.dataset.entityId;
         const entryId = btn.dataset.entryId;
         const current = Array.isArray(this._ttsSettings?.tts_media_players) ? this._ttsSettings.tts_media_players : [];
-        const settings = { ...this._ttsSettings, tts_media_players: current.filter((id) => id !== entityId) };
+        const vols = { ...(this._ttsSettings?.tts_media_player_volumes || {}) };
+        delete vols[entityId];
+        const settings = { ...this._ttsSettings, tts_media_players: current.filter((id) => id !== entityId), tts_media_player_volumes: vols };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       });
     });
@@ -2113,20 +2730,167 @@ var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURICompon
       });
     }
 
-    // TTS volume slider
-    const ttsVolumeSlider = this.shadowRoot.querySelector("#tts-volume-slider");
-    const ttsVolumeValue = this.shadowRoot.querySelector("#tts-volume-value");
-    if (ttsVolumeSlider) {
-      const saveVolume = () => {
-        const v = parseFloat(ttsVolumeSlider.value, 10);
-        const entryId = ttsVolumeSlider.dataset.entryId;
-        const settings = { ...this._ttsSettings, tts_volume: v };
+    // Per-media-player volume sliders
+    this.shadowRoot.querySelectorAll(".player-volume-slider").forEach((slider) => {
+      const entityId = slider.dataset.entityId;
+      const entryId = slider.dataset.entryId;
+      const valueSpan = this.shadowRoot.querySelector(`.player-volume-value[data-entity-id="${entityId}"]`);
+      slider.addEventListener("input", () => {
+        if (valueSpan) valueSpan.textContent = Math.round(parseFloat(slider.value) * 100) + "%";
+      });
+      slider.addEventListener("change", () => {
+        const v = parseFloat(slider.value);
+        const vols = { ...(this._ttsSettings?.tts_media_player_volumes || {}) };
+        vols[entityId] = v;
+        const settings = { ...this._ttsSettings, tts_media_player_volumes: vols };
+        this._saveTtsSettings(entryId, settings).then(() => this._render());
+      });
+    });
+
+    // Cache toggle
+    const cacheToggle = this.shadowRoot.querySelector("#tts-cache-toggle");
+    if (cacheToggle) {
+      const entryId = cacheToggle.dataset.entryId;
+      const toggleHandler = () => {
+        const next = !(this._ttsSettings?.tts_cache !== false);
+        const settings = { ...this._ttsSettings, tts_cache: next };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       };
-      ttsVolumeSlider.addEventListener("input", () => {
-        if (ttsVolumeValue) ttsVolumeValue.textContent = Math.round(parseFloat(ttsVolumeSlider.value, 10) * 100) + "%";
+      cacheToggle.addEventListener("click", toggleHandler);
+      cacheToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHandler(); }
       });
-      ttsVolumeSlider.addEventListener("change", saveVolume);
+    }
+
+    // Language checkbox (enable/disable)
+    const langCheckbox = this.shadowRoot.querySelector("#tts-language-checkbox");
+    if (langCheckbox) {
+      langCheckbox.addEventListener("change", () => {
+        if (!langCheckbox.checked) {
+          // Unchecked: clear language
+          const acc = this._accounts?.find(a => a.entry_id === this._selectedAccount);
+          const entryId = acc?.entry_id;
+          if (entryId) {
+            const settings = { ...this._ttsSettings, tts_language: "" };
+            this._saveTtsSettings(entryId, settings).then(() => this._render());
+          } else { this._render(); }
+        } else {
+          this._render(); // re-render to show input
+        }
+      });
+    }
+
+    // Language input
+    const langInput = this.shadowRoot.querySelector("#tts-language-input");
+    if (langInput) {
+      let debounceTimer;
+      langInput.addEventListener("input", () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const entryId = langInput.dataset.entryId;
+          const settings = { ...this._ttsSettings, tts_language: langInput.value || "" };
+          this._saveTtsSettings(entryId, settings).then(() => this._render());
+        }, 600);
+      });
+    }
+
+    // Options checkbox (enable/disable)
+    const optCheckbox = this.shadowRoot.querySelector("#tts-options-checkbox");
+    if (optCheckbox) {
+      optCheckbox.addEventListener("change", () => {
+        if (!optCheckbox.checked) {
+          // Unchecked: clear options
+          const acc = this._accounts?.find(a => a.entry_id === this._selectedAccount);
+          const entryId = acc?.entry_id;
+          if (entryId) {
+            const settings = { ...this._ttsSettings, tts_options: {} };
+            this._saveTtsSettings(entryId, settings).then(() => this._render());
+          } else { this._render(); }
+        } else {
+          this._render(); // re-render to show textarea
+        }
+      });
+    }
+
+    // Options YAML editor
+    const optEditor = this.shadowRoot.querySelector("#tts-options-editor");
+    if (optEditor) {
+      let debounceTimer;
+      // Allow tab key inside textarea
+      optEditor.addEventListener("keydown", (e) => {
+        if (e.key === "Tab") {
+          e.preventDefault();
+          const start = optEditor.selectionStart;
+          const end = optEditor.selectionEnd;
+          optEditor.value = optEditor.value.substring(0, start) + "  " + optEditor.value.substring(end);
+          optEditor.selectionStart = optEditor.selectionEnd = start + 2;
+        }
+      });
+      optEditor.addEventListener("input", () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const entryId = optEditor.dataset.entryId;
+          const parsed = this._parseYamlOptions(optEditor.value);
+          const settings = { ...this._ttsSettings, tts_options: parsed };
+          this._saveTtsSettings(entryId, settings).then(() => {});
+        }, 800);
+      });
+    }
+
+    // Test TTS button
+    const testBtn = this.shadowRoot.querySelector("#tts-test-btn");
+    if (testBtn) {
+      testBtn.addEventListener("click", async () => {
+        const statusEl = this.shadowRoot.querySelector("#tts-test-status");
+        const msgInput = this.shadowRoot.querySelector("#tts-test-message");
+        const message = (msgInput?.value || "").trim() || "This is a test from Uber Eats";
+        const settings = this._ttsSettings || {};
+        const selectedMedia = Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [];
+        const ttsEntity = settings.tts_entity_id || "";
+        const perPlayerVols = settings.tts_media_player_volumes || {};
+        const defaultVol = typeof settings.tts_volume === "number" ? settings.tts_volume : 0.5;
+        const ttsCache = settings.tts_cache !== false;
+        const ttsLanguage = (settings.tts_language || "").trim() || undefined;
+        const ttsOptions = settings.tts_options && Object.keys(settings.tts_options).length > 0 ? settings.tts_options : undefined;
+
+        if (!ttsEntity) {
+          if (statusEl) { statusEl.textContent = "No TTS engine selected."; statusEl.className = "tts-test-status error"; }
+          return;
+        }
+        if (selectedMedia.length === 0) {
+          if (statusEl) { statusEl.textContent = "No media players added."; statusEl.className = "tts-test-status error"; }
+          return;
+        }
+
+        testBtn.disabled = true;
+        if (statusEl) { statusEl.textContent = "Sending..."; statusEl.className = "tts-test-status"; }
+
+        // Send test to each selected media player
+        let allOk = true;
+        for (const mp of selectedMedia) {
+          const vol = typeof perPlayerVols[mp] === "number" ? perPlayerVols[mp] : defaultVol;
+          try {
+            await this._hass.callWS({
+              type: "uber_eats/test_tts",
+              tts_entity_id: ttsEntity,
+              media_player_id: mp,
+              message,
+              volume_level: vol,
+              cache: ttsCache,
+              language: ttsLanguage || "",
+              options: ttsOptions || {},
+            });
+          } catch (err) {
+            allOk = false;
+            if (statusEl) { statusEl.textContent = "Error: " + (err.message || err); statusEl.className = "tts-test-status error"; }
+          }
+        }
+        if (allOk && statusEl) {
+          statusEl.textContent = "Test sent successfully!";
+          statusEl.className = "tts-test-status success";
+        }
+        testBtn.disabled = false;
+      });
     }
 
     // Interval toggle
