@@ -8,6 +8,7 @@ CONF_TIME_ZONE = "time_zone"
 # Internal storage keys (parsed from cookie)
 CONF_SID = "sid"
 CONF_SESSION_ID = "session_id"
+CONF_FULL_COOKIE = "full_cookie"  # Full cookie string for APIs that need it
 
 # TTS notification settings (stored in config entry options, managed via panel UI)
 CONF_TTS_ENABLED = "tts_enabled"
@@ -32,7 +33,7 @@ CONF_DRIVER_NEARBY_DISTANCE_FEET = "driver_nearby_distance_feet"
 DEFAULT_DRIVER_NEARBY_DISTANCE_FEET = 200
 
 ENDPOINT = "https://www.ubereats.com/api/getActiveOrdersV1"
-ENDPOINT_PAST_ORDERS = "https://www.ubereats.com/api/getPastOrdersV1"
+ENDPOINT_PAST_ORDERS = "https://www.ubereats.com/_p/api/getPastOrdersV1"
 HEADERS_TEMPLATE = {
     "Content-Type": "application/json",
     "X-CSRF-Token": "x",

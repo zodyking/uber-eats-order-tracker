@@ -39,6 +39,8 @@ class UberEatsPanel extends HTMLElement {
     this._pastOrders = [];
     this._pastOrdersLoading = false;
     this._accountStats = null;
+    this._langEnabled = false;  // Temp flag for language toggle
+    this._optEnabled = false;   // Temp flag for options toggle
   }
 
   set hass(hass) {
@@ -297,6 +299,8 @@ class UberEatsPanel extends HTMLElement {
     this._pastOrders = [];
     this._pastOrdersLoading = false;
     this._accountStats = null;
+    this._langEnabled = false;
+    this._optEnabled = false;
     this._render();
   }
 
@@ -975,6 +979,9 @@ class UberEatsPanel extends HTMLElement {
           width: 100%;
           margin: 0 auto;
           box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
         }
         
         .details-grid {
@@ -1239,7 +1246,6 @@ class UberEatsPanel extends HTMLElement {
           background: #1a1a1a;
           border-radius: 16px;
           padding: 24px;
-          margin-bottom: 24px;
         }
         .tts-toggle-row {
           display: flex;
@@ -1363,25 +1369,89 @@ class UberEatsPanel extends HTMLElement {
         .media-players-list {
           display: flex;
           flex-direction: column;
-          gap: 12px;
-          margin-bottom: 8px;
+          gap: 10px;
+          margin-bottom: 12px;
         }
         .media-player-item {
           background: #111;
           border-radius: 10px;
-          padding: 12px 14px;
           border: 1px solid #333;
+          overflow: hidden;
+        }
+        .media-player-item.expanded {
+          border-color: #06C167;
         }
         .media-player-header {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          margin-bottom: 8px;
+          padding: 12px 14px;
+          cursor: pointer;
+          user-select: none;
+          transition: background 0.15s ease;
+        }
+        .media-player-header:hover {
+          background: #1a1a1a;
+        }
+        .media-player-expand-icon {
+          width: 20px;
+          height: 20px;
+          margin-right: 10px;
+          color: #888;
+          transition: transform 0.2s ease;
+          flex-shrink: 0;
+        }
+        .media-player-item.expanded .media-player-expand-icon {
+          transform: rotate(90deg);
+          color: #06C167;
         }
         .media-player-name {
           font-size: 14px;
           font-weight: 500;
           color: #fff;
+          flex: 1;
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .media-player-remove {
+          background: none;
+          border: none;
+          color: #666;
+          font-size: 18px;
+          cursor: pointer;
+          padding: 4px 8px;
+          margin-left: 8px;
+          border-radius: 4px;
+          transition: all 0.15s ease;
+        }
+        .media-player-remove:hover {
+          background: rgba(220, 53, 69, 0.2);
+          color: #dc3545;
+        }
+        .media-player-body {
+          display: none;
+          padding: 0 14px 14px 14px;
+          border-top: 1px solid #222;
+          background: #0a0a0a;
+        }
+        .media-player-item.expanded .media-player-body {
+          display: block;
+        }
+        .media-player-setting {
+          padding: 12px 0;
+          border-bottom: 1px solid #222;
+        }
+        .media-player-setting:last-child {
+          border-bottom: none;
+        }
+        .media-player-setting label {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #888;
+          margin-bottom: 8px;
+          display: block;
         }
         .media-player-volume label {
           font-size: 11px;
@@ -1425,6 +1495,28 @@ class UberEatsPanel extends HTMLElement {
         .tts-checkbox-content {
           padding-left: 30px;
           padding-bottom: 4px;
+        }
+        /* Toggle input content - shown below toggle fields */
+        .tts-toggle-input-content {
+          padding: 0 0 16px 0;
+        }
+        .tts-toggle-input-content input[type="text"] {
+          width: 100%;
+          padding: 12px 14px;
+          background: #111;
+          border: 1px solid #333;
+          border-radius: 8px;
+          color: #fff;
+          font-size: 14px;
+          box-sizing: border-box;
+        }
+        .tts-toggle-input-content input[type="text"]:focus {
+          outline: none;
+          border-color: #06C167;
+        }
+        .tts-toggle-input-content.disabled input[type="text"] {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
         /* Options code editor area */
         .tts-options-editor {
@@ -1617,8 +1709,7 @@ class UberEatsPanel extends HTMLElement {
         .details-two-column {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 20px;
-          margin-bottom: 0;
+          gap: 24px;
         }
         @media (max-width: 768px) {
           .details-two-column {
@@ -1626,14 +1717,15 @@ class UberEatsPanel extends HTMLElement {
           }
         }
         .details-two-column .details-section {
-          margin-bottom: 0;
+          height: 100%;
+          box-sizing: border-box;
         }
 
         /* Statistics Card */
         .stats-section {
-          background: #1e1e1e;
-          border-radius: 12px;
-          padding: 20px;
+          background: #1a1a1a;
+          border-radius: 16px;
+          padding: 24px;
         }
         .stats-loading, .stats-empty {
           display: flex;
@@ -1726,10 +1818,9 @@ class UberEatsPanel extends HTMLElement {
 
         /* Past Orders Section */
         .past-orders-section {
-          margin-top: 24px;
-          padding: 20px;
-          background: #1e1e1e;
-          border-radius: 12px;
+          padding: 24px;
+          background: #1a1a1a;
+          border-radius: 16px;
           box-sizing: border-box;
         }
         .past-orders-section .section-title {
@@ -2189,8 +2280,9 @@ class UberEatsPanel extends HTMLElement {
     const ttsOptionsYaml = Object.keys(ttsOptions).length > 0
       ? Object.entries(ttsOptions).map(([k, v]) => `${k}: ${v}`).join("\n")
       : "";
-    const langEnabled = !!ttsLanguage;
-    const optionsEnabled = Object.keys(ttsOptions).length > 0;
+    // langEnabled/optionsEnabled: true if has value OR if user just toggled on
+    const langEnabled = !!ttsLanguage || this._langEnabled;
+    const optionsEnabled = Object.keys(ttsOptions).length > 0 || this._optEnabled;
     const intervalEnabled = !!settings.tts_interval_enabled;
     const intervalMinutes = Math.max(5, Math.min(15, parseInt(settings.tts_interval_minutes, 10) || 10));
     const driverNearbyEnabled = !!settings.driver_nearby_automation_enabled;
@@ -2208,22 +2300,29 @@ class UberEatsPanel extends HTMLElement {
       `<option value="${e.entity_id}">${e.name || e.entity_id}</option>`
     ).join("");
 
-    // Each media player: chip with remove + its own volume slider
+    // Each media player: collapsible sub-card with settings
     const mediaPlayersHtml = selectedMedia.map((entityId) => {
       const ent = mediaList.find((e) => e.entity_id === entityId);
       const name = ent ? (ent.name || entityId) : entityId;
       const vol = typeof perPlayerVols[entityId] === "number" ? perPlayerVols[entityId] : defaultVol;
       return `
         <div class="media-player-item" data-entity-id="${entityId}">
-          <div class="media-player-header">
+          <div class="media-player-header" data-toggle-player="${entityId}">
+            <svg class="media-player-expand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
             <span class="media-player-name">${esc(name)}</span>
-            <button type="button" class="media-chip-remove" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" aria-label="Remove">×</button>
+            <button type="button" class="media-player-remove" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" aria-label="Remove" title="Remove">×</button>
           </div>
-          <div class="media-player-volume">
-            <label>Volume</label>
-            <div class="volume-slider-row">
-              <input type="range" class="player-volume-slider" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" min="0" max="1" step="0.05" value="${vol}" ${enabled ? "" : "disabled"} />
-              <span class="volume-value player-volume-value" data-entity-id="${entityId}">${Math.round(vol * 100)}%</span>
+          <div class="media-player-body">
+            <div class="media-player-setting">
+              <label>Volume Level</label>
+              <div class="volume-slider-row">
+                <input type="range" class="player-volume-slider" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" min="0" max="1" step="0.05" value="${vol}" ${enabled ? "" : "disabled"} />
+                <span class="volume-value player-volume-value" data-entity-id="${entityId}">${Math.round(vol * 100)}%</span>
+              </div>
+            </div>
+            <div class="media-player-setting">
+              <label>Entity ID</label>
+              <div style="font-family: monospace; font-size: 12px; color: #666; word-break: break-all;">${entityId}</div>
             </div>
           </div>
         </div>`;
@@ -2280,26 +2379,30 @@ class UberEatsPanel extends HTMLElement {
               </div>
             </div>
             <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
-              <input type="checkbox" class="tts-checkbox" id="tts-language-checkbox" ${langEnabled ? "checked" : ""} ${enabled ? "" : "disabled"} />
-              <div class="tts-checkbox-label">
-                <strong>Language</strong>
-                <span>Language to use for speech generation.</span>
+              <div class="tts-toggle-row" style="width:100%">
+                <div style="flex:1">
+                  <strong style="color:#fff;font-size:14px">Language</strong>
+                  <span style="font-size:12px;color:#888;display:block;margin-top:2px">Language to use for speech generation.</span>
+                </div>
+                <div class="tts-toggle ${langEnabled ? "enabled" : ""}" id="tts-language-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${langEnabled}"><span class="tts-toggle-knob"></span></div>
               </div>
             </div>
             ${langEnabled ? `
-            <div class="tts-checkbox-content ${enabled ? "" : "disabled"}">
-              <input type="text" id="tts-language-input" value="${esc(ttsLanguage)}" placeholder="e.g. en, es, fr" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} style="width:100%;padding:10px 14px;background:#111;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px;box-sizing:border-box" />
+            <div class="tts-toggle-input-content ${enabled ? "" : "disabled"}">
+              <input type="text" id="tts-language-input" value="${esc(ttsLanguage)}" placeholder="e.g. en, es, fr" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
             </div>
             ` : ""}
             <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
-              <input type="checkbox" class="tts-checkbox" id="tts-options-checkbox" ${optionsEnabled ? "checked" : ""} ${enabled ? "" : "disabled"} />
-              <div class="tts-checkbox-label">
-                <strong>Options</strong>
-                <span>A dictionary containing integration-specific options (e.g. voice for Piper).</span>
+              <div class="tts-toggle-row" style="width:100%">
+                <div style="flex:1">
+                  <strong style="color:#fff;font-size:14px">Options</strong>
+                  <span style="font-size:12px;color:#888;display:block;margin-top:2px">A dictionary containing integration-specific options (e.g. voice for Piper).</span>
+                </div>
+                <div class="tts-toggle ${optionsEnabled ? "enabled" : ""}" id="tts-options-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${optionsEnabled}"><span class="tts-toggle-knob"></span></div>
               </div>
             </div>
-            ${optionsEnabled || ttsOptionsYaml ? `
-            <div class="tts-checkbox-content ${enabled ? "" : "disabled"}">
+            ${optionsEnabled ? `
+            <div class="tts-toggle-input-content ${enabled ? "" : "disabled"}">
               <textarea id="tts-options-editor" class="tts-options-editor" data-entry-id="${acc.entry_id}" placeholder="voice: en_US-trump-high" ${enabled ? "" : "disabled"}>${esc(ttsOptionsYaml)}</textarea>
             </div>
             ` : ""}
@@ -2701,8 +2804,20 @@ class UberEatsPanel extends HTMLElement {
       });
     }
 
-    // Remove media player (chip remove buttons)
-    this.shadowRoot.querySelectorAll(".media-chip-remove").forEach((btn) => {
+    // Toggle media player card expansion
+    this.shadowRoot.querySelectorAll(".media-player-header[data-toggle-player]").forEach((header) => {
+      header.addEventListener("click", (e) => {
+        // Don't toggle if clicking the remove button
+        if (e.target.closest(".media-player-remove")) return;
+        const item = header.closest(".media-player-item");
+        if (item) {
+          item.classList.toggle("expanded");
+        }
+      });
+    });
+
+    // Remove media player buttons
+    this.shadowRoot.querySelectorAll(".media-player-remove").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -2762,21 +2877,27 @@ class UberEatsPanel extends HTMLElement {
       });
     }
 
-    // Language checkbox (enable/disable)
-    const langCheckbox = this.shadowRoot.querySelector("#tts-language-checkbox");
-    if (langCheckbox) {
-      langCheckbox.addEventListener("change", () => {
-        if (!langCheckbox.checked) {
-          // Unchecked: clear language
-          const acc = this._accounts?.find(a => a.entry_id === this._selectedAccount);
-          const entryId = acc?.entry_id;
-          if (entryId) {
-            const settings = { ...this._ttsSettings, tts_language: "" };
-            this._saveTtsSettings(entryId, settings).then(() => this._render());
-          } else { this._render(); }
+    // Language toggle (enable/disable)
+    const langToggle = this.shadowRoot.querySelector("#tts-language-toggle");
+    if (langToggle) {
+      const entryId = langToggle.dataset.entryId;
+      const toggleHandler = () => {
+        const currentLang = this._ttsSettings?.tts_language || "";
+        const isEnabled = currentLang.length > 0;
+        if (isEnabled) {
+          // Currently enabled, disable it (clear language)
+          const settings = { ...this._ttsSettings, tts_language: "" };
+          this._saveTtsSettings(entryId, settings).then(() => this._render());
         } else {
-          this._render(); // re-render to show input
+          // Currently disabled, enable it (render will show input)
+          // We use a special flag to show the input even if language is empty
+          this._langEnabled = true;
+          this._render();
         }
+      };
+      langToggle.addEventListener("click", toggleHandler);
+      langToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHandler(); }
       });
     }
 
@@ -2789,26 +2910,39 @@ class UberEatsPanel extends HTMLElement {
         debounceTimer = setTimeout(() => {
           const entryId = langInput.dataset.entryId;
           const settings = { ...this._ttsSettings, tts_language: langInput.value || "" };
-          this._saveTtsSettings(entryId, settings).then(() => this._render());
+          this._saveTtsSettings(entryId, settings).then(() => {
+            // Don't re-render, just save
+          });
         }, 600);
+      });
+      // Save on blur
+      langInput.addEventListener("blur", () => {
+        const entryId = langInput.dataset.entryId;
+        const settings = { ...this._ttsSettings, tts_language: langInput.value || "" };
+        this._saveTtsSettings(entryId, settings);
       });
     }
 
-    // Options checkbox (enable/disable)
-    const optCheckbox = this.shadowRoot.querySelector("#tts-options-checkbox");
-    if (optCheckbox) {
-      optCheckbox.addEventListener("change", () => {
-        if (!optCheckbox.checked) {
-          // Unchecked: clear options
-          const acc = this._accounts?.find(a => a.entry_id === this._selectedAccount);
-          const entryId = acc?.entry_id;
-          if (entryId) {
-            const settings = { ...this._ttsSettings, tts_options: {} };
-            this._saveTtsSettings(entryId, settings).then(() => this._render());
-          } else { this._render(); }
+    // Options toggle (enable/disable)
+    const optToggle = this.shadowRoot.querySelector("#tts-options-toggle");
+    if (optToggle) {
+      const entryId = optToggle.dataset.entryId;
+      const toggleHandler = () => {
+        const currentOpts = this._ttsSettings?.tts_options || {};
+        const isEnabled = Object.keys(currentOpts).length > 0;
+        if (isEnabled) {
+          // Currently enabled, disable it (clear options)
+          const settings = { ...this._ttsSettings, tts_options: {} };
+          this._saveTtsSettings(entryId, settings).then(() => this._render());
         } else {
-          this._render(); // re-render to show textarea
+          // Currently disabled, enable it (render will show editor)
+          this._optEnabled = true;
+          this._render();
         }
+      };
+      optToggle.addEventListener("click", toggleHandler);
+      optToggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHandler(); }
       });
     }
 

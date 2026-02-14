@@ -13,6 +13,7 @@ from .const import (
     CONF_COOKIE,
     CONF_SID,
     CONF_SESSION_ID,
+    CONF_FULL_COOKIE,
     CONF_ACCOUNT_NAME,
     CONF_TIME_ZONE,
     ENDPOINT,
@@ -196,12 +197,13 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if not is_valid:
                         errors["base"] = "invalid_credentials"
                     else:
-                        # Store parsed values, not full cookie string (security)
+                        # Store parsed values and full cookie for APIs that need it
                         return self.async_create_entry(
                             title=account_name,
                             data={
                                 CONF_SID: parsed["sid"],
                                 CONF_SESSION_ID: parsed["session_id"],
+                                CONF_FULL_COOKIE: cookie_string,
                                 CONF_ACCOUNT_NAME: account_name,
                                 CONF_TIME_ZONE: ha_tz,
                             },
@@ -252,7 +254,8 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data={
                             **entry.data,
                             CONF_SID: parsed["sid"],
-                            CONF_SESSION_ID: parsed["session_id"]
+                            CONF_SESSION_ID: parsed["session_id"],
+                            CONF_FULL_COOKIE: cookie_string,
                         },
                     )
                 errors["base"] = "invalid_credentials"
@@ -302,7 +305,8 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data={
                             **entry.data,
                             CONF_SID: parsed["sid"],
-                            CONF_SESSION_ID: parsed["session_id"]
+                            CONF_SESSION_ID: parsed["session_id"],
+                            CONF_FULL_COOKIE: cookie_string,
                         },
                     )
                 errors["base"] = "invalid_credentials"

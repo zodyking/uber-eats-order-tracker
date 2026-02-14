@@ -41,12 +41,13 @@ def _has_driver(driver_name):
 
 
 class UberEatsCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry_id, sid, session_id, account_name, time_zone):
+    def __init__(self, hass, entry_id, sid, session_id, account_name, time_zone, full_cookie=None):
         self.entry_id = entry_id
         self.sid = sid
         self.session_id = session_id  # Renamed from uuid
         self.account_name = account_name
         self.time_zone = time_zone
+        self.full_cookie = full_cookie  # Full cookie for APIs that need it
         self.hass = hass
         self._order_history = []  # Per-account history
         self._previous_data = None  # Set on first update
@@ -279,7 +280,11 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         locale = self._get_locale_code(self.time_zone)
         url = f"{ENDPOINT_PAST_ORDERS}?localeCode={locale}"
         headers = dict(HEADERS_TEMPLATE)
-        headers["Cookie"] = f"sid={self.sid}"
+        # Use full cookie if available, otherwise fall back to sid
+        if self.full_cookie:
+            headers["Cookie"] = self.full_cookie
+        else:
+            headers["Cookie"] = f"sid={self.sid}"
 
         all_orders = []
         current_year = datetime.now().year

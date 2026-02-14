@@ -13,7 +13,7 @@ from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 
 from .coordinator import UberEatsCoordinator
-from .const import DOMAIN, CONF_SID, CONF_SESSION_ID, CONF_ACCOUNT_NAME, CONF_TIME_ZONE
+from .const import DOMAIN, CONF_SID, CONF_SESSION_ID, CONF_FULL_COOKIE, CONF_ACCOUNT_NAME, CONF_TIME_ZONE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data[CONF_SESSION_ID],
             entry.data[CONF_ACCOUNT_NAME],
             entry.data[CONF_TIME_ZONE],
+            entry.data.get(CONF_FULL_COOKIE),
         )
         # Use async_config_entry_first_refresh to properly handle auth errors
         await coordinator.async_config_entry_first_refresh()
