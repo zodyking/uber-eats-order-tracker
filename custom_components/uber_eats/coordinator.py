@@ -116,10 +116,20 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                         map_url = self._get_map_url(lat, lon) if lat and lon else "No Map Available"
                         driver_eta_title = feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"
 
+                        # Full timeline text: prefer timelineSummary; when empty, use titleSummary.summary.text (e.g. "Picking up your order…")
+                        status_obj = feed_cards[0].get("status", {}) if feed_cards else {}
+                        timeline_summary = status_obj.get("timelineSummary", "") or ""
+                        if isinstance(timeline_summary, dict):
+                            timeline_summary = timeline_summary.get("text", "") or ""
+                        if not timeline_summary or timeline_summary.strip() == "":
+                            title_summary = status_obj.get("titleSummary", {}).get("summary", {})
+                            timeline_summary = title_summary.get("text", "") or ""
+                        order_status_text = (timeline_summary or "Unknown").strip() or "Unknown"
+
                         current_data.update({
                             "active": True,
                             "order_stage": self._parse_stage(feed_cards),
-                            "order_status": feed_cards[0].get("status", {}).get("timelineSummary", "Unknown") if feed_cards else "Unknown",
+                            "order_status": order_status_text,
                             "driver_name": contacts[0].get("title", "Unknown") if contacts else "Unknown",
 
                             "driver_eta_str": driver_eta_title,
@@ -140,7 +150,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
 
                             "restaurant_name": active_overview.get("title", "Unknown"),
                             "order_id": order.get("uuid", "Unknown"),
-                            "order_status_description": feed_cards[0].get("status", {}).get("timelineSummary", "Unknown") if feed_cards else "Unknown",
+                            "order_status_description": order_status_text,
                             "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
                         })
 

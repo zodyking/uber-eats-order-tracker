@@ -84,10 +84,11 @@ class UberEatsPanel extends HTMLElement {
     this._cardClickDelegationAttached = true;
     this.shadowRoot.addEventListener("click", (e) => {
       const card = e.target.closest(".account-card");
-      if (!card || !card.dataset.entryId) return;
-      if (!this._hass) return;
+      if (!card) return;
+      const entryId = card.getAttribute("data-entry-id") || card.dataset.entryId;
+      if (!entryId || !this._hass) return;
       e.preventDefault();
-      this._selectAccount(card.dataset.entryId);
+      this._selectAccount(entryId);
     });
   }
 
@@ -156,10 +157,46 @@ class UberEatsPanel extends HTMLElement {
   }
 
   async _selectAccount(entryId) {
+    const listAccount = this._accounts.find((a) => a.entry_id === entryId);
+    const homeLat = this._hass?.config?.latitude;
+    const homeLon = this._hass?.config?.longitude;
+    const homeLocation = homeLat != null && homeLon != null ? { lat: homeLat, lon: homeLon } : null;
+    const fallbackAccount = listAccount
+      ? {
+          ...listAccount,
+          tracking_active: listAccount.active && listAccount.driver_name && listAccount.driver_name !== "No Driver Assigned" && listAccount.driver_name !== "Unknown",
+          driver_assigned: listAccount.driver_name && listAccount.driver_name !== "No Driver Assigned" && listAccount.driver_name !== "Unknown",
+          order_status_description: listAccount.order_status,
+          home_location: homeLocation,
+        }
+      : {
+          entry_id: entryId,
+          account_name: "Loading…",
+          time_zone: "UTC",
+          active: false,
+          tracking_active: false,
+          driver_assigned: false,
+          connection_status: "unknown",
+          order_stage: "No Active Order",
+          order_status: "No Active Order",
+          order_status_description: "No Active Order",
+          restaurant_name: "—",
+          driver_name: "No Driver Assigned",
+          driver_eta: "No ETA",
+          minutes_remaining: null,
+          order_id: "—",
+          latest_arrival: "—",
+          driver_location: homeLocation ? { lat: homeLat, lon: homeLon, street: "—", suburb: "—", address: "—" } : null,
+          home_location: homeLocation,
+        };
+
+    this._selectedAccount = fallbackAccount;
+    this._currentView = "account-details";
+    this._render();
+
     const details = await this._loadAccountDetails(entryId);
     if (details) {
       this._selectedAccount = details;
-      this._currentView = "account-details";
       await Promise.all([
         this._loadTtsSettings(entryId),
         this._loadTtsEntities(),
@@ -1866,7 +1903,7 @@ class UberEatsPanel extends HTMLElement {
 
     // Account name buttons (main page - navigate to account details) - same pattern as Edit Account
     this.shadowRoot.querySelectorAll("button.account-name").forEach((btn) => {
-      const entryId = btn.dataset.entryId;
+      const entryId = btn.getAttribute("data-entry-id") || btn.dataset.entryId;
       if (!entryId) return;
       btn.addEventListener("click", (e) => {
         e.stopPropagation();

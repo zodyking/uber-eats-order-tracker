@@ -1,5 +1,6 @@
 # Agent working files (not for repo)
 Agent-Files/
+scripts/
 
 # Python
 __pycache__/
