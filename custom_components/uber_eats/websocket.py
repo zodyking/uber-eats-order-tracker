@@ -34,6 +34,21 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_INTEGRATION_VERSION: str | None = None
+
+
+def _get_integration_version() -> str:
+    """Return integration version from manifest (cached). Never raises."""
+    global _INTEGRATION_VERSION
+    if _INTEGRATION_VERSION is None:
+        try:
+            manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
+            with open(manifest_path, encoding="utf-8") as f:
+                _INTEGRATION_VERSION = json.load(f).get("version", "1.0.0")
+        except Exception:
+            _INTEGRATION_VERSION = "1.0.0"
+    return _INTEGRATION_VERSION
+
 
 @callback
 def async_setup(hass: HomeAssistant) -> None:
@@ -156,9 +171,13 @@ async def websocket_get_accounts(
             },
         })
     
+    try:
+        version = _get_integration_version()
+    except Exception:
+        version = "1.0.0"
     connection.send_result(msg["id"], {
         "accounts": accounts,
-        "version": _get_integration_version(),
+        "version": version,
     })
 
 

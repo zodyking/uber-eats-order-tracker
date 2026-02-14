@@ -517,11 +517,12 @@ class UberEatsPanel extends HTMLElement {
           margin: 0 auto;
         }
         
-        /* Main page: flex so footer stays at bottom */
+        /* Main page: footer pinned to bottom of view */
         .main-page {
           display: flex;
           flex-direction: column;
           min-height: 100%;
+          padding-bottom: 52px;
         }
         
         .main-page .content {
@@ -529,11 +530,16 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .panel-footer {
-          flex-shrink: 0;
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
           text-align: center;
           padding: 12px 16px;
           font-size: 12px;
           color: #06C167;
+          background: #0f0f0f;
+          z-index: 50;
         }
         
         /* Account Cards - Full Width */
