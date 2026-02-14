@@ -44,34 +44,7 @@ class UberEatsPanel extends HTMLElement {
     this._playerLangEnabled = {};  // Per-player language toggle
     this._playerOptsEnabled = {};  // Per-player options toggle
     this._expandedPlayers = {};  // Track which media player cards are expanded
-    // Cache for statistics and past orders - uses localStorage for persistence
-    this._statsCache = this._loadStatsFromLocalStorage();
     this._userProfile = null;  // User profile from getUserV1 API
-  }
-
-  // LocalStorage helpers for persistent caching
-  _getLocalStorageKey() {
-    return "uber_eats_stats_cache";
-  }
-
-  _loadStatsFromLocalStorage() {
-    try {
-      const raw = localStorage.getItem(this._getLocalStorageKey());
-      if (raw) {
-        return JSON.parse(raw);
-      }
-    } catch (e) {
-      console.warn("Failed to load stats from localStorage:", e);
-    }
-    return {};
-  }
-
-  _saveStatsToLocalStorage() {
-    try {
-      localStorage.setItem(this._getLocalStorageKey(), JSON.stringify(this._statsCache));
-    } catch (e) {
-      console.warn("Failed to save stats to localStorage:", e);
-    }
   }
 
   set hass(hass) {
@@ -2853,60 +2826,32 @@ class UberEatsPanel extends HTMLElement {
   async _fetchPastOrders(entryId) {
     if (!this._hass || !entryId) return;
     
-    // Load from localStorage cache immediately if available
-    const cached = this._statsCache[entryId];
-    if (cached && cached.orders && cached.orders.length > 0) {
-      this._pastOrders = cached.orders || [];
-      this._accountStats = cached.statistics || null;
-      this._pastOrdersLoading = false; // No loading indicator - show cached data immediately
-      this._render();
-      // Still fetch fresh data in background (without showing loading)
-      this._fetchPastOrdersBackground(entryId);
-    } else {
-      // First time load - show loading indicator
-      this._pastOrdersLoading = true;
-      this._pastOrders = [];
-      this._accountStats = null;
-      this._render();
-      // Fetch and wait
-      await this._fetchPastOrdersBackground(entryId);
-      this._pastOrdersLoading = false;
-      this._render();
-    }
-  }
-
-  async _fetchPastOrdersBackground(entryId) {
-    // Fetch fresh data in background and update cache + localStorage
+    // Backend handles caching - returns cached data instantly if available
+    // Show loading indicator only briefly (backend may return cached data immediately)
+    this._pastOrdersLoading = true;
+    this._render();
+    
     try {
       const result = await this._hass.callWS({
         type: "uber_eats/get_past_orders",
         entry_id: entryId,
       });
-      const newOrders = result.orders || [];
-      const newStats = result.statistics || null;
       
-      // Check if data actually changed before re-rendering
-      const cached = this._statsCache[entryId];
-      const ordersChanged = JSON.stringify(newOrders) !== JSON.stringify(cached?.orders || []);
-      const statsChanged = JSON.stringify(newStats) !== JSON.stringify(cached?.statistics || null);
+      this._pastOrders = result.orders || [];
+      this._accountStats = result.statistics || null;
       
-      // Update memory cache
-      this._statsCache[entryId] = {
-        orders: newOrders,
-        statistics: newStats,
-        timestamp: Date.now(),
-      };
-      // Persist to localStorage
-      this._saveStatsToLocalStorage();
-      
-      // Only update UI if data changed and we're still viewing this account
-      if ((ordersChanged || statsChanged) && this._selectedAccount?.entry_id === entryId) {
-        this._pastOrders = newOrders;
-        this._accountStats = newStats;
-        this._render();
+      // If from_cache is true, backend is refreshing in background
+      // Data will be fresh on next fetch
+      if (result.from_cache) {
+        console.debug("Loaded past orders from server cache, background refresh in progress");
       }
     } catch (err) {
       console.error("Failed to fetch past orders:", err);
+      this._pastOrders = [];
+      this._accountStats = null;
+    } finally {
+      this._pastOrdersLoading = false;
+      this._render();
     }
   }
 

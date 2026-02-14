@@ -646,8 +646,9 @@ async def websocket_get_past_orders(
         return
 
     try:
-        result = await coordinator.fetch_past_orders()
-        # result is {"orders": [...], "statistics": {...}}
+        # Use cached method - returns cached data immediately, refreshes in background
+        result = await coordinator.get_past_orders_cached()
+        # result is {"orders": [...], "statistics": {...}, "from_cache": bool}
         connection.send_result(msg["id"], result)
     except Exception as e:
         _LOGGER.error("Failed to fetch past orders: %s", e)

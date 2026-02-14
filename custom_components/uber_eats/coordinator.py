@@ -1,5 +1,8 @@
 import aiohttp
+import asyncio
+import json
 import logging
+import os
 from datetime import datetime, timedelta
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -56,6 +59,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self._last_interval_tts_time = None  # For interval TTS when driver assigned
         self._driver_nearby_triggered_orders = set()  # Track which order UUIDs have triggered nearby action
         self._cached_user_profile = None  # Cached user profile from getUserV1
+        self._cached_past_orders = None  # In-memory cache of past orders data
+        self._past_orders_cache_loaded = False  # Track if cache has been loaded from disk
         super().__init__(
             hass,
             _LOGGER,
@@ -338,6 +343,78 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         if time_zone.startswith("Australia/"):
             return "au"
         return "us"
+
+    def _get_cache_file_path(self):
+        """Get the path to the cache file for this account's past orders."""
+        cache_dir = self.hass.config.path("custom_components", "uber_eats", ".cache")
+        # Use entry_id for unique file per account
+        return os.path.join(cache_dir, f"past_orders_{self.entry_id}.json")
+
+    async def _load_past_orders_cache(self):
+        """Load past orders cache from disk."""
+        if self._past_orders_cache_loaded:
+            return self._cached_past_orders
+        
+        cache_file = self._get_cache_file_path()
+        try:
+            if os.path.exists(cache_file):
+                def read_file():
+                    with open(cache_file, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                data = await self.hass.async_add_executor_job(read_file)
+                self._cached_past_orders = data
+                self._past_orders_cache_loaded = True
+                _LOGGER.debug("Loaded past orders cache for %s", self.account_name)
+                return data
+        except Exception as e:
+            _LOGGER.warning("Failed to load past orders cache: %s", e)
+        
+        self._past_orders_cache_loaded = True
+        return None
+
+    async def _save_past_orders_cache(self, data):
+        """Save past orders data to disk cache."""
+        cache_file = self._get_cache_file_path()
+        try:
+            cache_dir = os.path.dirname(cache_file)
+            def write_file():
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+            await self.hass.async_add_executor_job(write_file)
+            self._cached_past_orders = data
+            _LOGGER.debug("Saved past orders cache for %s", self.account_name)
+        except Exception as e:
+            _LOGGER.warning("Failed to save past orders cache: %s", e)
+
+    async def get_past_orders_cached(self):
+        """Get past orders with caching - returns cached data immediately, refreshes in background.
+        
+        Returns dict with:
+          - orders: list of order dicts
+          - statistics: computed stats
+          - from_cache: True if this is cached data (fresh fetch happening in background)
+        """
+        # Load from disk cache if not yet loaded
+        cached = await self._load_past_orders_cache()
+        
+        if cached and cached.get("orders"):
+            # Return cached data immediately, schedule background refresh
+            asyncio.create_task(self._refresh_past_orders_background())
+            return {**cached, "from_cache": True}
+        
+        # No cache - fetch fresh
+        fresh_data = await self.fetch_past_orders()
+        await self._save_past_orders_cache(fresh_data)
+        return {**fresh_data, "from_cache": False}
+
+    async def _refresh_past_orders_background(self):
+        """Fetch fresh past orders in background and update cache."""
+        try:
+            fresh_data = await self.fetch_past_orders()
+            await self._save_past_orders_cache(fresh_data)
+        except Exception as e:
+            _LOGGER.debug("Background past orders refresh failed: %s", e)
 
     async def fetch_past_orders(self):
         """Fetch all past orders from the Uber Eats API (paginated), filtered to current year.
