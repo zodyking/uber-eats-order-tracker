@@ -1,7 +1,9 @@
 """WebSocket API for Uber Eats panel."""
 from __future__ import annotations
 
+import json
 import logging
+import os
 from typing import Any
 
 import voluptuous as vol
@@ -154,7 +156,10 @@ async def websocket_get_accounts(
             },
         })
     
-    connection.send_result(msg["id"], {"accounts": accounts})
+    connection.send_result(msg["id"], {
+        "accounts": accounts,
+        "version": _get_integration_version(),
+    })
 
 
 @websocket_api.websocket_command(

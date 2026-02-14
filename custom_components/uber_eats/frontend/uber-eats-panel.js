@@ -35,6 +35,7 @@ class UberEatsPanel extends HTMLElement {
     this._ttsSettings = null;
     this._automations = [];
     this._advancedSettingsCollapsed = true;
+    this._integrationVersion = null;
   }
 
   set hass(hass) {
@@ -120,6 +121,7 @@ class UberEatsPanel extends HTMLElement {
         type: "uber_eats/get_accounts",
       });
       this._accounts = result.accounts || [];
+      if (result.version != null) this._integrationVersion = result.version;
       this._render();
     } catch (e) {
       console.error("Failed to load Uber Eats accounts:", e);
@@ -515,6 +517,25 @@ class UberEatsPanel extends HTMLElement {
           margin: 0 auto;
         }
         
+        /* Main page: flex so footer stays at bottom */
+        .main-page {
+          display: flex;
+          flex-direction: column;
+          min-height: 100%;
+        }
+        
+        .main-page .content {
+          flex: 1;
+        }
+        
+        .panel-footer {
+          flex-shrink: 0;
+          text-align: center;
+          padding: 12px 16px;
+          font-size: 12px;
+          color: #06C167;
+        }
+        
         /* Account Cards - Full Width */
         .account-list {
           display: flex;
@@ -727,16 +748,24 @@ class UberEatsPanel extends HTMLElement {
           filter: grayscale(100%) invert(100%) contrast(90%);
         }
         
+        .card-map-click-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 1;
+          cursor: pointer;
+        }
         .map-overlay {
           position: absolute;
           top: 8px;
           right: 8px;
+          z-index: 2;
           background: rgba(0,0,0,0.8);
           padding: 6px 12px;
           border-radius: 6px;
           font-size: 12px;
           font-weight: 500;
           color: #06C167;
+          pointer-events: none;
         }
         
         /* Instructions Page */
@@ -1360,22 +1389,26 @@ class UberEatsPanel extends HTMLElement {
     const accountCards = this._accounts.length > 0
       ? this._accounts.map(acc => this._renderAccountCard(acc)).join("")
       : this._renderEmptyState();
+    const versionLabel = this._integrationVersion != null ? `Uber Eats (v${this._integrationVersion})` : "Uber Eats";
 
     return `
-      <div class="header">
-        <button class="menu-btn" id="menu-btn" title="Menu">
-          <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
-        </button>
-        ${UBER_EATS_LOGO_SIMPLE}
-        <button class="btn btn-primary" id="add-account-btn">
-          <span>+</span> Add Account
-        </button>
-      </div>
-      
-      <div class="content">
-        <div class="account-list">
-          ${accountCards}
+      <div class="main-page">
+        <div class="header">
+          <button class="menu-btn" id="menu-btn" title="Menu">
+            <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
+          </button>
+          ${UBER_EATS_LOGO_SIMPLE}
+          <button class="btn btn-primary" id="add-account-btn">
+            <span>+</span> Add Account
+          </button>
         </div>
+        
+        <div class="content">
+          <div class="account-list">
+            ${accountCards}
+          </div>
+        </div>
+        <div class="panel-footer" aria-label="Integration version">${this._escapeHtml(versionLabel)}</div>
       </div>
     `;
   }
@@ -1463,6 +1496,7 @@ class UberEatsPanel extends HTMLElement {
           <div class="card-map">
             ${mapUrl ? `
               <iframe src="${mapUrl}" title="Location Map"></iframe>
+              <div class="card-map-click-overlay" aria-hidden="true"></div>
               <div class="map-overlay">${mapLabel}</div>
             ` : `
               <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;">
@@ -1921,7 +1955,18 @@ class UberEatsPanel extends HTMLElement {
       backBtn.addEventListener("click", () => this._goBack());
     }
 
-    // Account name buttons (main page - navigate to account details) - same pattern as Edit Account
+    // Whole card click (main page) – open account details; direct attach so it works after go-back
+    this.shadowRoot.querySelectorAll(".account-card").forEach((card) => {
+      const entryId = card.getAttribute("data-entry-id") || card.dataset.entryId;
+      if (!entryId || !this._hass) return;
+      card.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._selectAccount(entryId);
+      });
+    });
+
+    // Account name buttons (main page) – same action, in case card listener is missed
     this.shadowRoot.querySelectorAll("button.account-name").forEach((btn) => {
       const entryId = btn.getAttribute("data-entry-id") || btn.dataset.entryId;
       if (!entryId) return;
@@ -1930,6 +1975,25 @@ class UberEatsPanel extends HTMLElement {
         if (this._hass) this._selectAccount(entryId);
       });
     });
+
+    // Advanced settings dropdown (details page) – direct attach so it works after every render
+    const advancedHeader = this.shadowRoot.querySelector("#advanced-settings-header");
+    if (advancedHeader) {
+      advancedHeader.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
+        this._render();
+      });
+      advancedHeader.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
+          this._render();
+        }
+      });
+    }
 
     // Reconfigure button
     const reconfigureBtn = this.shadowRoot.querySelector("#reconfigure-btn");
@@ -1950,8 +2014,6 @@ class UberEatsPanel extends HTMLElement {
         this._deleteAccount(entryId);
       });
     }
-
-    // Advanced settings toggle is handled by _attachCardClickDelegation (delegation on shadowRoot)
 
     // TTS toggle
     const ttsToggle = this.shadowRoot.querySelector("#tts-toggle");
