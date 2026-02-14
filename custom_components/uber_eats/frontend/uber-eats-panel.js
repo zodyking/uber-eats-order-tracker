@@ -2199,7 +2199,7 @@ class UberEatsPanel extends HTMLElement {
     const automations = this._automations || [];
     const collapsed = this._advancedSettingsCollapsed;
 
-    const ttsOptions = ttsList.map((e) =>
+    const ttsSelectOptions = ttsList.map((e) =>
       `<option value="${e.entity_id}" ${e.entity_id === settings.tts_entity_id ? "selected" : ""}>${e.name || e.entity_id}</option>`
     ).join("");
 
@@ -2253,7 +2253,7 @@ class UberEatsPanel extends HTMLElement {
               <label>TTS Engine</label>
               <select id="tts-entity-select" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
                 <option value="">Select TTS engine...</option>
-                ${ttsOptions}
+                ${ttsSelectOptions}
               </select>
             </div>
             <div class="tts-field ${enabled ? "" : "disabled"}">
