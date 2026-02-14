@@ -583,25 +583,78 @@ class UberEatsPanel extends HTMLElement {
           box-shadow: 0 4px 24px rgba(6, 193, 103, 0.1);
         }
         
+        /* Card main: 3-column layout (account pic | info | map) */
         .card-main {
           display: flex;
-          min-height: 200px;
+          min-height: 180px;
         }
         
         @media (max-width: 768px) {
           .card-main {
             flex-direction: column;
           }
+          .card-account-pic {
+            width: 100%;
+            height: 120px;
+          }
           .card-map {
-            height: 180px;
+            height: 160px;
             width: 100%;
           }
         }
         
-        /* Card Info Section */
+        /* Account Picture - Left side rounded square */
+        .card-account-pic {
+          width: 140px;
+          min-height: 180px;
+          position: relative;
+          flex-shrink: 0;
+          overflow: hidden;
+          background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+        }
+        
+        .card-account-pic img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .card-account-pic .account-fallback {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 48px;
+          font-weight: 700;
+          color: #444;
+          background: linear-gradient(135deg, #2a2a2a 0%, #222 100%);
+        }
+        
+        .card-account-overlay {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          padding: 12px 10px 10px;
+          background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.6) 60%, transparent 100%);
+        }
+        
+        .card-account-overlay .account-name {
+          font-size: 13px;
+          font-weight: 600;
+          color: #fff;
+          text-align: center;
+          display: block;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        /* Card Info Section - Middle */
         .card-info {
           flex: 1;
-          padding: 28px 32px;
+          padding: 20px 24px;
           display: flex;
           flex-direction: column;
           justify-content: center;
@@ -610,76 +663,63 @@ class UberEatsPanel extends HTMLElement {
         
         .card-header {
           display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 16px;
-          margin-bottom: 20px;
-        }
-        
-        /* Avatar blocks with overlaid names */
-        .card-avatars {
-          display: flex;
-          gap: 16px;
-        }
-        
-        .avatar-block {
-          display: flex;
-          flex-direction: column;
           align-items: center;
-          gap: 8px;
-          cursor: pointer;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
         }
         
-        .avatar-block:hover .avatar-circle {
-          border-color: #06C167;
-          transform: scale(1.05);
+        /* Driver block - square avatar with name below */
+        .driver-block {
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
         
-        .avatar-circle {
-          width: 56px;
-          height: 56px;
-          border-radius: 50%;
+        .driver-avatar {
+          width: 48px;
+          height: 48px;
+          border-radius: 10px;
           overflow: hidden;
           background: #2a2a2a;
           display: flex;
           align-items: center;
           justify-content: center;
-          border: 2px solid #333;
-          transition: all 0.2s ease;
+          border: 2px solid rgba(6, 193, 103, 0.4);
+          flex-shrink: 0;
         }
         
-        .avatar-circle-driver {
-          border-color: rgba(6, 193, 103, 0.4);
-        }
-        
-        .avatar-img {
+        .driver-avatar img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
         
-        .avatar-fallback {
-          font-size: 20px;
-          font-weight: 600;
-          color: #888;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+        .driver-avatar .driver-fallback {
+          font-size: 22px;
         }
         
-        .avatar-name {
-          font-size: 13px;
-          font-weight: 500;
-          color: #fff;
-          text-align: center;
-          max-width: 80px;
+        .driver-info {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          min-width: 0;
+        }
+        
+        .driver-name {
+          font-size: 14px;
+          font-weight: 600;
+          color: #06C167;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
         
-        .avatar-block-driver .avatar-name {
-          color: #06C167;
+        .driver-label {
+          font-size: 11px;
+          color: #666;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
         }
         
         .status-badge {
@@ -1981,9 +2021,25 @@ class UberEatsPanel extends HTMLElement {
   }
 
   _renderMainPage() {
-    const accountCards = this._accounts.length > 0
-      ? this._accounts.map(acc => this._renderAccountCard(acc)).join("")
-      : this._renderEmptyState();
+    let accountCards = "";
+    
+    if (this._accounts.length > 0) {
+      // For each account, render one card per active order, or a "no order" card if none
+      for (const acc of this._accounts) {
+        const orders = acc.orders || [];
+        if (orders.length > 0) {
+          // Render one card per order
+          for (let i = 0; i < orders.length; i++) {
+            accountCards += this._renderOrderCard(acc, orders[i], i);
+          }
+        } else {
+          // No active orders - render a "no order" card
+          accountCards += this._renderNoOrderCard(acc);
+        }
+      }
+    } else {
+      accountCards = this._renderEmptyState();
+    }
 
     return `
       <div class="main-page">
@@ -2026,91 +2082,138 @@ class UberEatsPanel extends HTMLElement {
     return phone;
   }
 
-  _renderAccountCard(account) {
+  /** Render a card for a specific order */
+  _renderOrderCard(account, order, orderIndex) {
     const esc = (s) => this._escapeHtml(s ?? "");
-    const isActive = account.active;
     const hasError = account.connection_status === "error";
-    const cardClass = isActive ? "account-card has-order" : "account-card";
+    const cardClass = "account-card has-order";
     const noDriver =
-      !account.driver_name ||
-      account.driver_name === "No Driver Assigned" ||
-      account.driver_name === "Unknown";
+      !order.driver_name ||
+      order.driver_name === "No Driver Assigned" ||
+      order.driver_name === "Unknown";
 
-    const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
-    const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
+    // Get driver coordinates or fall back to home
+    const driverCoords = order.driver_location_coords || {};
+    const lat = driverCoords.lat || order.driver_location_lat || (this._hass?.config?.latitude || 0);
+    const lon = driverCoords.lon || order.driver_location_lon || (this._hass?.config?.longitude || 0);
     const mapUrl = this._getMapUrl(lat, lon, 0.001);
-    const mapLabel = isActive && !noDriver ? "📍 Driver Location" : "🏠 Home";
+    const mapLabel = !noDriver ? "📍 Driver" : "🏠 Home";
 
-    const timelineSummary = (account.order_status || account.order_status_description || "").trim();
+    const timelineSummary = (order.order_status || order.order_status_description || "").trim();
     const timelineDisplay = timelineSummary && timelineSummary !== "Unknown" && timelineSummary !== "No Active Order"
       ? timelineSummary
-      : this._displayOrderStatus(account);
-    const driverDisplay = noDriver ? "Not assigned" : account.driver_name;
+      : `Order ${orderIndex + 1}`;
+    const driverDisplay = noDriver ? "" : order.driver_name;
     const etaDisplay =
-      account.driver_eta && account.driver_eta !== "No ETA" && account.driver_eta !== "No ETA Available"
-        ? account.driver_eta
+      order.driver_eta_str && order.driver_eta_str !== "No ETA" && order.driver_eta_str !== "No ETA Available"
+        ? order.driver_eta_str
         : "—";
 
-    const userPic = account.user_picture_url;
-    const driverPic = account.driver_picture_url;
+    const userPic = order.user_picture_url || account.user_picture_url;
+    const driverPic = order.driver_picture_url;
     const accountInitial = (account.account_name || "?").charAt(0).toUpperCase();
 
     const cardStages = ["preparing", "picked up", "en route", "arriving"];
-    const cardStageIdx = cardStages.findIndex(s => (account.order_stage || "").toLowerCase().includes(s));
-    const safeStageIdx = cardStageIdx >= 0 ? cardStageIdx : (isActive ? 0 : -1);
+    const cardStageIdx = cardStages.findIndex(s => (order.order_stage || "").toLowerCase().includes(s));
+    const safeStageIdx = cardStageIdx >= 0 ? cardStageIdx : 0;
 
     return `
-      <div class="${cardClass}" data-entry-id="${account.entry_id}">
+      <div class="${cardClass}" data-entry-id="${account.entry_id}" data-order-index="${orderIndex}">
         <div class="card-main">
+          <div class="card-account-pic">
+            ${userPic ? `<img src="${esc(userPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+            <div class="account-fallback" style="${userPic ? "display:none" : ""}">${accountInitial}</div>
+            <div class="card-account-overlay">
+              <span class="account-name">${esc(account.account_name)}</span>
+            </div>
+          </div>
           <div class="card-info">
             <div class="card-header">
-              <div class="card-avatars">
-                <div class="avatar-block" data-entry-id="${account.entry_id}">
-                  <div class="avatar-circle">
-                    ${userPic ? `<img src="${esc(userPic)}" alt="" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
-                    <span class="avatar-fallback" style="${userPic ? "display:none" : ""}">${accountInitial}</span>
-                  </div>
-                  <span class="avatar-name">${esc(account.account_name)}</span>
+              ${!noDriver ? `
+              <div class="driver-block">
+                <div class="driver-avatar">
+                  ${driverPic ? `<img src="${esc(driverPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+                  <span class="driver-fallback" style="${driverPic ? "display:none" : ""}">🚗</span>
                 </div>
-                ${isActive && !noDriver ? `
-                <div class="avatar-block avatar-block-driver">
-                  <div class="avatar-circle avatar-circle-driver">
-                    ${driverPic ? `<img src="${esc(driverPic)}" alt="" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
-                    <span class="avatar-fallback" style="${driverPic ? "display:none" : ""}">🚗</span>
-                  </div>
-                  <span class="avatar-name">${esc(driverDisplay)}</span>
+                <div class="driver-info">
+                  <span class="driver-label">Driver</span>
+                  <span class="driver-name">${esc(driverDisplay)}</span>
                 </div>
-                ` : ""}
               </div>
-              <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
-                ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
+              ` : `<div></div>`}
+              <span class="status-badge ${hasError ? 'status-error' : 'status-active'}">
+                ${hasError ? 'Error' : 'Active Order'}
               </span>
             </div>
-            ${isActive ? `
-              <div class="card-oneline">
-                <span class="card-oneline-label">Restaurant:</span>
-                <span class="card-oneline-value">${esc(account.restaurant_name || "—")}</span>
-                <span class="card-oneline-sep">·</span>
-                <span class="card-oneline-label">ETA:</span>
-                <span class="card-oneline-value">${esc(etaDisplay)}</span>
-              </div>
-              <div class="card-timeline">${esc(timelineDisplay)}</div>
-              <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
-                ${cardStages.map((_, i) => {
-                  const completed = i < safeStageIdx;
-                  const current = i === safeStageIdx;
-                  return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
-                }).join("")}
-              </div>
-            ` : `
-              <div class="card-timeline waiting">Waiting for orders...</div>
-            `}
+            <div class="card-oneline">
+              <span class="card-oneline-label">Restaurant:</span>
+              <span class="card-oneline-value">${esc(order.restaurant_name || "—")}</span>
+              <span class="card-oneline-sep">·</span>
+              <span class="card-oneline-label">ETA:</span>
+              <span class="card-oneline-value">${esc(etaDisplay)}</span>
+            </div>
+            <div class="card-timeline">${esc(timelineDisplay)}</div>
+            <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
+              ${cardStages.map((_, i) => {
+                const completed = i < safeStageIdx;
+                const current = i === safeStageIdx;
+                return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
+              }).join("")}
+            </div>
           </div>
           <div class="card-map">
             ${mapUrl ? `
               <iframe src="${mapUrl}" title="Location Map"></iframe>
               <div class="card-map-click-overlay" aria-hidden="true"></div>
               <div class="map-overlay">${mapLabel}</div>
+            ` : `
+              <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:13px;">
+                Map unavailable
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /** Render a "no order" card for an account */
+  _renderNoOrderCard(account) {
+    const esc = (s) => this._escapeHtml(s ?? "");
+    const hasError = account.connection_status === "error";
+    const cardClass = "account-card";
+
+    const lat = this._hass?.config?.latitude || 0;
+    const lon = this._hass?.config?.longitude || 0;
+    const mapUrl = this._getMapUrl(lat, lon, 0.001);
+
+    const userPic = account.user_picture_url;
+    const accountInitial = (account.account_name || "?").charAt(0).toUpperCase();
+
+    return `
+      <div class="${cardClass}" data-entry-id="${account.entry_id}">
+        <div class="card-main">
+          <div class="card-account-pic">
+            ${userPic ? `<img src="${esc(userPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+            <div class="account-fallback" style="${userPic ? "display:none" : ""}">${accountInitial}</div>
+            <div class="card-account-overlay">
+              <span class="account-name">${esc(account.account_name)}</span>
+            </div>
+          </div>
+          <div class="card-info">
+            <div class="card-header">
+              <div></div>
+              <span class="status-badge ${hasError ? 'status-error' : 'status-inactive'}">
+                ${hasError ? 'Error' : 'No Order'}
+              </span>
+            </div>
+            <div class="card-timeline waiting">Waiting for orders...</div>
+          </div>
+          <div class="card-map">
+            ${mapUrl ? `
+              <iframe src="${mapUrl}" title="Location Map"></iframe>
+              <div class="card-map-click-overlay" aria-hidden="true"></div>
+              <div class="map-overlay">🏠 Home</div>
             ` : `
               <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:13px;">
                 Map unavailable

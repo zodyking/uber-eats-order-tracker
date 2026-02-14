@@ -162,12 +162,19 @@ async def websocket_get_accounts(
             display_lat = home_lat
             display_lon = home_lon
         
+        # Get orders array for multi-order support
+        orders_array = data.get("orders", [])
+        orders_count = data.get("orders_count", 0)
+
         accounts.append({
             "entry_id": entry.entry_id,
             "account_name": entry.data.get(CONF_ACCOUNT_NAME, "Unknown"),
             "time_zone": entry.data.get(CONF_TIME_ZONE, "UTC"),
             "active": is_active,
             "connection_status": connection_status,
+            "orders": orders_array,
+            "orders_count": orders_count,
+            # Flat fields for backward compatibility (first order)
             "order_stage": data.get("order_stage", "No Active Order"),
             "order_status": data.get("order_status", "No Active Order"),
             "restaurant_name": data.get("restaurant_name", "No Restaurant"),
@@ -298,6 +305,10 @@ async def websocket_get_account_data(
     
     tracking_active = is_active and driver_assigned and has_valid_coords
     
+    # Get orders array for multi-order support
+    orders_array = data.get("orders", [])
+    orders_count = data.get("orders_count", 0)
+
     result = {
         "entry_id": entry_id,
         "account_name": entry.data.get(CONF_ACCOUNT_NAME, "Unknown"),
@@ -306,6 +317,9 @@ async def websocket_get_account_data(
         "tracking_active": tracking_active,
         "driver_assigned": driver_assigned,
         "connection_status": connection_status,
+        "orders": orders_array,
+        "orders_count": orders_count,
+        # Flat fields for backward compatibility (first order)
         "order_stage": data.get("order_stage", "No Active Order"),
         "order_status": data.get("order_status", "No Active Order"),
         "order_status_description": data.get("order_status_description", "No Active Order"),
@@ -315,15 +329,15 @@ async def websocket_get_account_data(
         "minutes_remaining": data.get("minutes_remaining"),
         "order_id": data.get("order_id", "No Active Order"),
         "latest_arrival": data.get("latest_arrival", "No Latest Arrival"),
-            "driver_location": {
-                "lat": float(lat) if tracking_active else home_lat,
-                "lon": float(lon) if tracking_active else home_lon,
-                "street": data.get("driver_location_street", "Unknown"),
-                "suburb": data.get("driver_location_suburb", "Unknown"),
-                "quarter": data.get("driver_location_quarter", "Unknown"),
-                "county": data.get("driver_location_county", "Unknown"),
-                "address": data.get("driver_location_address", "Unknown"),
-            },
+        "driver_location": {
+            "lat": float(lat) if tracking_active else home_lat,
+            "lon": float(lon) if tracking_active else home_lon,
+            "street": data.get("driver_location_street", "Unknown"),
+            "suburb": data.get("driver_location_suburb", "Unknown"),
+            "quarter": data.get("driver_location_quarter", "Unknown"),
+            "county": data.get("driver_location_county", "Unknown"),
+            "address": data.get("driver_location_address", "Unknown"),
+        },
         "home_location": data.get("home_location") or {"lat": home_lat, "lon": home_lon},
         "store_location": data.get("store_location"),
         "driver_location_coords": data.get("driver_location_coords"),

@@ -105,101 +105,55 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                                 f"Authentication error: {error_code}"
                             )
                     
-                    orders = data.get("data", {}).get("orders", [])
+                    raw_orders = data.get("data", {}).get("orders", [])
                     current_data = self._default_data()
 
-                    if orders:
-                        order = orders[0]
-                        feed_cards = order.get("feedCards", [])
-                        contacts = order.get("contacts", [])
-                        active_overview = order.get("activeOrderOverview", {})
-                        background_feed_cards = order.get("backgroundFeedCards", [])
-                        order_info = order.get("orderInfo", {})
+                    # Parse ALL orders into an array for multi-order support
+                    parsed_orders = []
+                    for order in raw_orders:
+                        parsed_order = await self._parse_single_order(order, session)
+                        if parsed_order:
+                            parsed_orders.append(parsed_order)
 
-                        # Extract map entities (EATER=home, STORE=restaurant, COURIER=driver)
-                        map_entities = self._get_map_entities(background_feed_cards)
-                        store_loc = order_info.get("storeInfo", {}).get("location", {})
-                        store_lat = store_loc.get("latitude")
-                        store_lon = store_loc.get("longitude")
-                        if store_lat is not None and store_lon is not None and "STORE" not in map_entities:
-                            map_entities["STORE"] = {"lat": float(store_lat), "lon": float(store_lon)}
+                    # Store orders array and count
+                    current_data["orders"] = parsed_orders
+                    current_data["orders_count"] = len(parsed_orders)
 
-                        eater = map_entities.get("EATER", {})
-                        store = map_entities.get("STORE", {})
-                        courier = map_entities.get("COURIER", {})
-
-                        lat = courier.get("lat") or store.get("lat") or eater.get("lat")
-                        lon = courier.get("lon") or store.get("lon") or eater.get("lon")
-
-                        # Reverse geocode remaining components (or use defaults)
-                        if lat and lon:
-                            loc = await self._reverse_geocode(lat, lon, session)
-                        else:
-                            loc = {}
-
-                        map_url = self._get_map_url(lat, lon) if lat and lon else "No Map Available"
-                        driver_eta_title = feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"
-
-                        # Full timeline text: prefer timelineSummary; when empty, use titleSummary.summary.text (e.g. "Picking up your order…")
-                        status_obj = feed_cards[0].get("status", {}) if feed_cards else {}
-                        timeline_summary = status_obj.get("timelineSummary", "") or ""
-                        if isinstance(timeline_summary, dict):
-                            timeline_summary = timeline_summary.get("text", "") or ""
-                        if not timeline_summary or timeline_summary.strip() == "":
-                            title_summary = status_obj.get("titleSummary", {}).get("summary", {})
-                            timeline_summary = title_summary.get("text", "") or ""
-                        order_status_text = (timeline_summary or "Unknown").strip() or "Unknown"
-
-                        # Driver picture and phone
-                        driver_picture_url = None
-                        for fc in feed_cards:
-                            if fc.get("type") == "courier" and fc.get("courier"):
-                                driver_picture_url = fc["courier"][0].get("iconUrl") or None
-                                break
-                        courier_contact = next((c for c in contacts if c.get("type") == "COURIER"), contacts[0] if contacts else {})
-                        driver_phone_formatted = courier_contact.get("formattedPhoneNumber") or courier_contact.get("phoneNumber") or ""
-
-                        # User (customer) picture
-                        user_picture_url = None
-                        customer_infos = order_info.get("customerInfos") or []
-                        if customer_infos:
-                            user_picture_url = customer_infos[0].get("pictureUrl") or None
-
+                    if parsed_orders:
+                        # Use first order for flat fields (backward compatibility)
+                        first = parsed_orders[0]
                         current_data.update({
                             "active": True,
-                            "order_stage": self._parse_stage(feed_cards),
-                            "order_status": order_status_text,
-                            "driver_name": contacts[0].get("title", "Unknown") if contacts else "Unknown",
+                            "order_stage": first.get("order_stage", "No Active Order"),
+                            "order_status": first.get("order_status", "No Active Order"),
+                            "driver_name": first.get("driver_name", "No Driver Assigned"),
 
-                            "driver_eta_str": driver_eta_title,
-                            "driver_eta": self._parse_eta_timestamp(driver_eta_title),
+                            "driver_eta_str": first.get("driver_eta_str", "No ETA Available"),
+                            "driver_eta": first.get("driver_eta"),
 
-                            "driver_location_lat": lat if lat else "No Active Order",
-                            "driver_location_lon": lon if lon else "No Active Order",
+                            "driver_location_lat": first.get("driver_location_lat", "No Active Order"),
+                            "driver_location_lon": first.get("driver_location_lon", "No Active Order"),
 
-                            # Location pieces (trimmed)
-                            "driver_location_street":   loc.get("road", "No Driver Assigned"),
-                            "driver_location_suburb":   loc.get("suburb", "No Driver Assigned"),
-                            "driver_location_quarter":  loc.get("quarter", "No Driver Assigned"),
-                            "driver_location_county":   loc.get("county", "No Driver Assigned"),
-                            "driver_location_address":  loc.get("address", "No Driver Assigned"),
+                            "driver_location_street": first.get("driver_location_street", "No Driver Assigned"),
+                            "driver_location_suburb": first.get("driver_location_suburb", "No Driver Assigned"),
+                            "driver_location_quarter": first.get("driver_location_quarter", "No Driver Assigned"),
+                            "driver_location_county": first.get("driver_location_county", "No Driver Assigned"),
+                            "driver_location_address": first.get("driver_location_address", "No Driver Assigned"),
 
-                            "map_url": map_url,
-                            "minutes_remaining": self._calculate_minutes(driver_eta_title),
+                            "map_url": first.get("map_url", "No Map Available"),
+                            "minutes_remaining": first.get("minutes_remaining"),
 
-                            "restaurant_name": active_overview.get("title", "Unknown"),
-                            "order_id": order.get("uuid", "Unknown"),
-                            "order_status_description": order_status_text,
-                            "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
+                            "restaurant_name": first.get("restaurant_name", "Unknown"),
+                            "order_id": first.get("order_id", "Unknown"),
+                            "order_status_description": first.get("order_status_description", "No Active Order"),
+                            "latest_arrival": first.get("latest_arrival", "No Latest Arrival"),
 
-                            # Extended: pics, phone, map locations for multi-marker map
-                            # Use order's customer picture, fall back to cached user profile picture
-                            "user_picture_url": user_picture_url or (self._cached_user_profile or {}).get("picture_url"),
-                            "driver_picture_url": driver_picture_url,
-                            "driver_phone_formatted": driver_phone_formatted,
-                            "home_location": eater if eater else {"lat": self.hass.config.latitude or 0, "lon": self.hass.config.longitude or 0},
-                            "store_location": store if store else None,
-                            "driver_location_coords": courier if courier else None,
+                            "user_picture_url": first.get("user_picture_url") or (self._cached_user_profile or {}).get("picture_url"),
+                            "driver_picture_url": first.get("driver_picture_url"),
+                            "driver_phone_formatted": first.get("driver_phone_formatted", ""),
+                            "home_location": first.get("home_location", {"lat": self.hass.config.latitude or 0, "lon": self.hass.config.longitude or 0}),
+                            "store_location": first.get("store_location"),
+                            "driver_location_coords": first.get("driver_location_coords"),
                         })
 
                         # optional history (kept as you had)
@@ -239,11 +193,97 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 out[t] = {"lat": float(lat), "lon": float(lon)}
         return out
 
+    async def _parse_single_order(self, order, session):
+        """Parse a single order object into a normalized dict."""
+        feed_cards = order.get("feedCards", [])
+        contacts = order.get("contacts", [])
+        active_overview = order.get("activeOrderOverview", {})
+        background_feed_cards = order.get("backgroundFeedCards", [])
+        order_info = order.get("orderInfo", {})
+
+        # Extract map entities (EATER=home, STORE=restaurant, COURIER=driver)
+        map_entities = self._get_map_entities(background_feed_cards)
+        store_loc = order_info.get("storeInfo", {}).get("location", {})
+        store_lat = store_loc.get("latitude")
+        store_lon = store_loc.get("longitude")
+        if store_lat is not None and store_lon is not None and "STORE" not in map_entities:
+            map_entities["STORE"] = {"lat": float(store_lat), "lon": float(store_lon)}
+
+        eater = map_entities.get("EATER", {})
+        store = map_entities.get("STORE", {})
+        courier = map_entities.get("COURIER", {})
+
+        lat = courier.get("lat") or store.get("lat") or eater.get("lat")
+        lon = courier.get("lon") or store.get("lon") or eater.get("lon")
+
+        # Reverse geocode remaining components (or use defaults)
+        if lat and lon:
+            loc = await self._reverse_geocode(lat, lon, session)
+        else:
+            loc = {}
+
+        map_url = self._get_map_url(lat, lon) if lat and lon else "No Map Available"
+        driver_eta_title = feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"
+
+        # Full timeline text
+        status_obj = feed_cards[0].get("status", {}) if feed_cards else {}
+        timeline_summary = status_obj.get("timelineSummary", "") or ""
+        if isinstance(timeline_summary, dict):
+            timeline_summary = timeline_summary.get("text", "") or ""
+        if not timeline_summary or timeline_summary.strip() == "":
+            title_summary = status_obj.get("titleSummary", {}).get("summary", {})
+            timeline_summary = title_summary.get("text", "") or ""
+        order_status_text = (timeline_summary or "Unknown").strip() or "Unknown"
+
+        # Driver picture and phone
+        driver_picture_url = None
+        for fc in feed_cards:
+            if fc.get("type") == "courier" and fc.get("courier"):
+                driver_picture_url = fc["courier"][0].get("iconUrl") or None
+                break
+        courier_contact = next((c for c in contacts if c.get("type") == "COURIER"), contacts[0] if contacts else {})
+        driver_phone_formatted = courier_contact.get("formattedPhoneNumber") or courier_contact.get("phoneNumber") or ""
+
+        # User (customer) picture
+        user_picture_url = None
+        customer_infos = order_info.get("customerInfos") or []
+        if customer_infos:
+            user_picture_url = customer_infos[0].get("pictureUrl") or None
+
+        return {
+            "order_id": order.get("uuid", "Unknown"),
+            "order_stage": self._parse_stage(feed_cards),
+            "order_status": order_status_text,
+            "order_status_description": order_status_text,
+            "restaurant_name": active_overview.get("title", "Unknown"),
+            "driver_name": contacts[0].get("title", "Unknown") if contacts else "Unknown",
+            "driver_eta_str": driver_eta_title,
+            "driver_eta": self._parse_eta_timestamp(driver_eta_title),
+            "minutes_remaining": self._calculate_minutes(driver_eta_title),
+            "driver_location_lat": lat if lat else "No Active Order",
+            "driver_location_lon": lon if lon else "No Active Order",
+            "driver_location_street": loc.get("road", "No Driver Assigned"),
+            "driver_location_suburb": loc.get("suburb", "No Driver Assigned"),
+            "driver_location_quarter": loc.get("quarter", "No Driver Assigned"),
+            "driver_location_county": loc.get("county", "No Driver Assigned"),
+            "driver_location_address": loc.get("address", "No Driver Assigned"),
+            "map_url": map_url,
+            "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
+            "user_picture_url": user_picture_url or (self._cached_user_profile or {}).get("picture_url"),
+            "driver_picture_url": driver_picture_url,
+            "driver_phone_formatted": driver_phone_formatted,
+            "home_location": eater if eater else {"lat": self.hass.config.latitude or 0, "lon": self.hass.config.longitude or 0},
+            "store_location": store if store else None,
+            "driver_location_coords": courier if courier else None,
+        }
+
     def _default_data(self):
         home_lat = self.hass.config.latitude or 0.0
         home_lon = self.hass.config.longitude or 0.0
         return {
             "active": False,
+            "orders": [],
+            "orders_count": 0,
             "order_stage": "No Active Order",
             "order_status": "No Active Order",
             "driver_name": "No Driver Assigned",
