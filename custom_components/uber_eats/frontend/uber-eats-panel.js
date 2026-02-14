@@ -85,13 +85,7 @@ class UberEatsPanel extends HTMLElement {
       this.shadowRoot.removeEventListener("click", this._cardClickHandler);
     }
     this._cardClickHandler = (e) => {
-      const advancedHeader = e.target.closest("#advanced-settings-header");
-      if (advancedHeader) {
-        e.preventDefault();
-        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
-        this._render();
-        return;
-      }
+      // Account cards only - advanced settings handled by direct listener in _attachEventListeners
       const card = e.target.closest(".account-card");
       if (!card) return;
       const entryId = card.getAttribute("data-entry-id") || card.dataset.entryId;
@@ -100,17 +94,6 @@ class UberEatsPanel extends HTMLElement {
       this._selectAccount(entryId);
     };
     this.shadowRoot.addEventListener("click", this._cardClickHandler);
-    if (this._cardKeydownHandler) {
-      this.shadowRoot.removeEventListener("keydown", this._cardKeydownHandler);
-    }
-    this._cardKeydownHandler = (e) => {
-      if (e.target.closest("#advanced-settings-header") && (e.key === "Enter" || e.key === " ")) {
-        e.preventDefault();
-        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
-        this._render();
-      }
-    };
-    this.shadowRoot.addEventListener("keydown", this._cardKeydownHandler);
   }
 
   async _loadAccounts() {
@@ -370,10 +353,13 @@ class UberEatsPanel extends HTMLElement {
         content = this._renderMainPage();
     }
 
+    const versionLabel = this._integrationVersion != null ? `Uber Eats (v${this._integrationVersion})` : "Uber Eats";
+
     this.shadowRoot.innerHTML = `
       ${styles}
       <div class="panel-container">
         ${content}
+        <div class="panel-footer" aria-label="Integration version">${this._escapeHtml(versionLabel)}</div>
       </div>
     `;
 
@@ -398,8 +384,16 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .panel-container {
+          display: flex;
+          flex-direction: column;
           min-height: 100%;
           padding: 0;
+        }
+        
+        .panel-container > .main-page,
+        .panel-container > .details-page,
+        .panel-container > .instructions-page {
+          flex: 1;
         }
         
         /* Header */
@@ -517,12 +511,11 @@ class UberEatsPanel extends HTMLElement {
           margin: 0 auto;
         }
         
-        /* Main page: footer pinned to bottom of view */
+        /* Main page: flex layout so footer sits at bottom */
         .main-page {
           display: flex;
           flex-direction: column;
           min-height: 100%;
-          padding-bottom: 52px;
         }
         
         .main-page .content {
@@ -530,19 +523,13 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .panel-footer {
-          position: fixed;
-          bottom: 0;
-          left: 0;
-          right: 0;
           text-align: center;
-          padding: 12px 16px;
+          padding: 16px;
           font-size: 12px;
           color: #06C167;
-          background: #0f0f0f;
-          z-index: 50;
         }
         
-        /* Account Cards - Full Width */
+        /* Account Cards */
         .account-list {
           display: flex;
           flex-direction: column;
@@ -776,9 +763,17 @@ class UberEatsPanel extends HTMLElement {
         
         /* Instructions Page */
         .instructions-page {
+          display: flex;
+          flex-direction: column;
+        }
+        
+        .instructions-content {
+          flex: 1;
           padding: 40px 24px;
           max-width: 700px;
           margin: 0 auto;
+          width: 100%;
+          box-sizing: border-box;
         }
         
         .instructions-header {
@@ -1395,7 +1390,6 @@ class UberEatsPanel extends HTMLElement {
     const accountCards = this._accounts.length > 0
       ? this._accounts.map(acc => this._renderAccountCard(acc)).join("")
       : this._renderEmptyState();
-    const versionLabel = this._integrationVersion != null ? `Uber Eats (v${this._integrationVersion})` : "Uber Eats";
 
     return `
       <div class="main-page">
@@ -1414,7 +1408,6 @@ class UberEatsPanel extends HTMLElement {
             ${accountCards}
           </div>
         </div>
-        <div class="panel-footer" aria-label="Integration version">${this._escapeHtml(versionLabel)}</div>
       </div>
     `;
   }
@@ -1517,16 +1510,17 @@ class UberEatsPanel extends HTMLElement {
 
   _renderInstructionsPage() {
     return `
-      <div class="header">
-        <button class="menu-btn" id="menu-btn" title="Menu">
-          <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
-        </button>
-        <button class="btn-icon" id="back-btn">←</button>
-        ${UBER_EATS_LOGO_SIMPLE}
-        <div></div>
-      </div>
-      
       <div class="instructions-page">
+        <div class="header">
+          <button class="menu-btn" id="menu-btn" title="Menu">
+            <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
+          </button>
+          <button class="btn-icon" id="back-btn">←</button>
+          ${UBER_EATS_LOGO_SIMPLE}
+          <div></div>
+        </div>
+      
+        <div class="instructions-content">
         <div class="instructions-header">
           <h1>Add Uber Eats Account</h1>
           <p>Follow these steps to connect your Uber Eats account</p>
@@ -1589,6 +1583,7 @@ class UberEatsPanel extends HTMLElement {
         <div class="instructions-actions">
           <button class="btn btn-secondary" id="cancel-btn">Cancel</button>
           <button class="btn btn-primary" id="continue-btn">Continue to Setup →</button>
+        </div>
         </div>
       </div>
     `;
@@ -1786,6 +1781,7 @@ class UberEatsPanel extends HTMLElement {
   }
 
   _renderTtsSection(acc) {
+    const esc = (s) => this._escapeHtml(s);
     const settings = this._ttsSettings || {
       tts_enabled: false,
       tts_entity_id: "",
@@ -1834,8 +1830,6 @@ class UberEatsPanel extends HTMLElement {
     const automationOptions = automations.map((a) =>
       `<option value="${a.entity_id}" ${a.entity_id === driverAutomationEntity ? "selected" : ""}>${this._escapeHtml(a.name || a.entity_id)}</option>`
     ).join("");
-
-    const esc = (s) => this._escapeHtml(s);
 
     return `
       <div class="advanced-settings-section tts-section ${collapsed ? "collapsed" : ""}" id="advanced-settings-card">
