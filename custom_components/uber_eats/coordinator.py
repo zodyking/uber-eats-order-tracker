@@ -8,6 +8,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     ENDPOINT,
     ENDPOINT_PAST_ORDERS,
+    ENDPOINT_GET_USER,
     HEADERS_TEMPLATE,
     CONF_TTS_ENABLED,
     CONF_TTS_ENTITY_ID,
@@ -53,6 +54,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self._previous_data = None  # Set on first update
         self._last_interval_tts_time = None  # For interval TTS when driver assigned
         self._last_driver_nearby_triggered = False  # For 200 ft automation trigger
+        self._cached_user_profile = None  # Cached user profile from getUserV1
         super().__init__(
             hass,
             _LOGGER,
@@ -61,6 +63,15 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
+        # Fetch and cache user profile if not already cached
+        if self._cached_user_profile is None:
+            try:
+                profile = await self.fetch_user_profile()
+                self._cached_user_profile = profile
+            except Exception as e:
+                _LOGGER.debug("Failed to cache user profile: %s", e)
+                self._cached_user_profile = {"picture_url": None, "first_name": "", "last_name": ""}
+
         async with aiohttp.ClientSession() as session:
             locale_code = self._get_locale_code(self.time_zone)
             url = f"{ENDPOINT}?localeCode={locale_code}"
@@ -182,7 +193,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
 
                             # Extended: pics, phone, map locations for multi-marker map
-                            "user_picture_url": user_picture_url,
+                            # Use order's customer picture, fall back to cached user profile picture
+                            "user_picture_url": user_picture_url or (self._cached_user_profile or {}).get("picture_url"),
                             "driver_picture_url": driver_picture_url,
                             "driver_phone_formatted": driver_phone_formatted,
                             "home_location": eater if eater else {"lat": self.hass.config.latitude or 0, "lon": self.hass.config.longitude or 0},
@@ -255,7 +267,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "order_status_description": "No Active Order",
             "latest_arrival": "No Latest Arrival",
 
-            "user_picture_url": None,
+            "user_picture_url": (self._cached_user_profile or {}).get("picture_url"),
             "driver_picture_url": None,
             "driver_phone_formatted": "",
             "home_location": {"lat": home_lat, "lon": home_lon},
@@ -381,6 +393,40 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         statistics = self._compute_order_statistics(all_orders, current_year)
 
         return {"orders": all_orders, "statistics": statistics}
+
+    async def fetch_user_profile(self):
+        """Fetch user profile from the Uber Eats API.
+        
+        Returns dict with:
+          - picture_url: user's profile picture URL
+          - first_name: user's first name
+          - last_name: user's last name
+        """
+        locale = self._get_locale_code(self.time_zone)
+        url = f"{ENDPOINT_GET_USER}?localeCode={locale}"
+        headers = dict(HEADERS_TEMPLATE)
+        # Use full cookie if available, otherwise fall back to sid
+        if self.full_cookie:
+            headers["Cookie"] = self.full_cookie
+        else:
+            headers["Cookie"] = f"sid={self.sid}"
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url, headers=headers, json={}) as resp:
+                    if resp.status != 200:
+                        _LOGGER.error("getUserV1 API returned %s", resp.status)
+                        return {"picture_url": None, "first_name": "", "last_name": ""}
+                    data = await resp.json()
+                    user_data = data.get("data", {})
+                    return {
+                        "picture_url": user_data.get("pictureUrl"),
+                        "first_name": user_data.get("firstName", ""),
+                        "last_name": user_data.get("lastName", ""),
+                    }
+            except Exception as e:
+                _LOGGER.error("Error fetching user profile: %s", e, exc_info=True)
+                return {"picture_url": None, "first_name": "", "last_name": ""}
 
     def _compute_order_statistics(self, orders, year):
         """Compute statistics from orders list."""

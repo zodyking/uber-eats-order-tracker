@@ -18,6 +18,7 @@ from .const import (
     CONF_TIME_ZONE,
     ENDPOINT,
     ENDPOINT_PAST_ORDERS,
+    ENDPOINT_GET_USER,
     HEADERS_TEMPLATE,
 )
 
@@ -114,15 +115,46 @@ def _validate_cookie_string(cookie_string: str) -> tuple[str | None, dict[str, s
     return (None, parsed)
 
 
+def _get_locale_code(tz: str) -> str:
+    """Get locale code from timezone."""
+    if tz.startswith("America/"):
+        return "us"
+    if tz.startswith("Australia/"):
+        return "au"
+    return "us"
+
+
+async def _fetch_user_profile(full_cookie: str, time_zone: str) -> dict[str, str] | None:
+    """Fetch user profile from getUserV1 API.
+    
+    Returns dict with 'first_name' and 'last_name' on success, None on failure.
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            locale_code = _get_locale_code(time_zone)
+            url = f"{ENDPOINT_GET_USER}?localeCode={locale_code}"
+            headers = HEADERS_TEMPLATE.copy()
+            headers["Cookie"] = full_cookie
+            
+            async with session.post(url, json={}, headers=headers) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("getUserV1 returned status %s", resp.status)
+                    return None
+                data = await resp.json()
+                user_data = data.get("data", {})
+                if not user_data.get("isLoggedIn"):
+                    return None
+                return {
+                    "first_name": user_data.get("firstName", ""),
+                    "last_name": user_data.get("lastName", ""),
+                }
+    except Exception as e:
+        _LOGGER.debug("User profile fetch error: %s", e)
+        return None
+
+
 async def _validate_credentials(hass, sid: str, session_id: str, time_zone: str) -> bool:
     """Validate credentials by making test API calls to both endpoints. Returns True if valid."""
-    def _get_locale_code(tz: str) -> str:
-        if tz.startswith("America/"):
-            return "us"
-        if tz.startswith("Australia/"):
-            return "au"
-        return "us"
-    
     try:
         async with aiohttp.ClientSession() as session:
             locale_code = _get_locale_code(time_zone)
@@ -169,12 +201,7 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input:
             cookie_string = user_input.get(CONF_COOKIE, "").strip()
-            account_name = user_input.get(CONF_ACCOUNT_NAME, "").strip()
             tz_selected = user_input.get(CONF_TIME_ZONE, ha_tz)
-
-            # Validate account name
-            if not account_name:
-                errors[CONF_ACCOUNT_NAME] = "entry_too_short"
 
             # Validate timezone
             if tz_selected != ha_tz:
@@ -197,24 +224,32 @@ class UberEatsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if not is_valid:
                         errors["base"] = "invalid_credentials"
                     else:
-                        # Store parsed values and full cookie for APIs that need it
-                        return self.async_create_entry(
-                            title=account_name,
-                            data={
-                                CONF_SID: parsed["sid"],
-                                CONF_SESSION_ID: parsed["session_id"],
-                                CONF_FULL_COOKIE: cookie_string,
-                                CONF_ACCOUNT_NAME: account_name,
-                                CONF_TIME_ZONE: ha_tz,
-                            },
-                        )
+                        # Fetch user profile to get account name
+                        user_profile = await _fetch_user_profile(cookie_string, ha_tz)
+                        if not user_profile:
+                            errors["base"] = "invalid_credentials"
+                        else:
+                            first_name = user_profile.get("first_name", "")
+                            last_name = user_profile.get("last_name", "")
+                            account_name = f"{first_name} {last_name}".strip() or "Uber Eats Account"
+                            
+                            # Store parsed values and full cookie for APIs that need it
+                            return self.async_create_entry(
+                                title=account_name,
+                                data={
+                                    CONF_SID: parsed["sid"],
+                                    CONF_SESSION_ID: parsed["session_id"],
+                                    CONF_FULL_COOKIE: cookie_string,
+                                    CONF_ACCOUNT_NAME: account_name,
+                                    CONF_TIME_ZONE: ha_tz,
+                                },
+                            )
                 except Exception as e:
                     _LOGGER.exception("Error during integration setup: %s", e)
                     errors["base"] = "unknown_error"
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_ACCOUNT_NAME): str,
                 vol.Required(CONF_TIME_ZONE, default=ha_tz): vol.In(TIME_ZONES),
                 vol.Required(CONF_COOKIE): str,
             }

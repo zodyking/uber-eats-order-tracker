@@ -17,6 +17,7 @@ CONF_TTS_MEDIA_PLAYERS = "tts_media_players"
 CONF_TTS_MESSAGE_PREFIX = "tts_message_prefix"
 CONF_TTS_VOLUME = "tts_volume"
 CONF_TTS_MEDIA_PLAYER_VOLUMES = "tts_media_player_volumes"  # dict {entity_id: float}
+CONF_TTS_MEDIA_PLAYER_SETTINGS = "tts_media_player_settings"  # dict {entity_id: {cache, language, options}}
 CONF_TTS_CACHE = "tts_cache"
 CONF_TTS_LANGUAGE = "tts_language"
 CONF_TTS_OPTIONS = "tts_options"  # dict e.g. {"voice": "en_US-trump-high"}
@@ -34,6 +35,7 @@ DEFAULT_DRIVER_NEARBY_DISTANCE_FEET = 200
 
 ENDPOINT = "https://www.ubereats.com/api/getActiveOrdersV1"
 ENDPOINT_PAST_ORDERS = "https://www.ubereats.com/_p/api/getPastOrdersV1"
+ENDPOINT_GET_USER = "https://www.ubereats.com/_p/api/getUserV1"
 HEADERS_TEMPLATE = {
     "Content-Type": "application/json",
     "X-CSRF-Token": "x",

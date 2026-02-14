@@ -41,6 +41,10 @@ class UberEatsPanel extends HTMLElement {
     this._accountStats = null;
     this._langEnabled = false;  // Temp flag for language toggle
     this._optEnabled = false;   // Temp flag for options toggle
+    this._playerLangEnabled = {};  // Per-player language toggle
+    this._playerOptsEnabled = {};  // Per-player options toggle
+    this._expandedPlayers = {};  // Track which media player cards are expanded
+    this._userProfile = null;  // User profile from getUserV1 API
   }
 
   set hass(hass) {
@@ -211,6 +215,7 @@ class UberEatsPanel extends HTMLElement {
         this._loadTtsSettings(entryId),
         this._loadTtsEntities(),
         this._loadAutomations(),
+        this._fetchUserProfile(entryId),
       ]);
       this._render();
       // Fetch past orders in background (non-blocking)
@@ -301,6 +306,10 @@ class UberEatsPanel extends HTMLElement {
     this._accountStats = null;
     this._langEnabled = false;
     this._optEnabled = false;
+    this._playerLangEnabled = {};
+    this._playerOptsEnabled = {};
+    this._expandedPlayers = {};
+    this._userProfile = null;
     this._render();
   }
 
@@ -554,73 +563,93 @@ class UberEatsPanel extends HTMLElement {
           gap: 16px;
         }
         
+        /* ===== ACCOUNT CARD ===== */
         .account-card {
           background: #1a1a1a;
-          border-radius: 16px;
+          border-radius: 20px;
           overflow: hidden;
           transition: all 0.2s ease;
-          border: 2px solid transparent;
+          border: 1px solid #2a2a2a;
           cursor: pointer;
         }
         
         .account-card:hover {
           border-color: #06C167;
-          transform: translateY(-2px);
+          box-shadow: 0 8px 32px rgba(6, 193, 103, 0.15);
         }
         
         .account-card.has-order {
           border-color: #06C167;
+          box-shadow: 0 4px 24px rgba(6, 193, 103, 0.1);
         }
         
         .card-main {
-          display: grid;
-          grid-template-columns: 1fr 300px;
-          gap: 0;
+          display: flex;
+          min-height: 200px;
         }
         
         @media (max-width: 768px) {
           .card-main {
-            grid-template-columns: 1fr;
+            flex-direction: column;
           }
           .card-map {
-            height: 200px;
+            height: 180px;
+            width: 100%;
           }
         }
         
+        /* Card Info Section */
         .card-info {
-          padding: 20px 24px;
+          flex: 1;
+          padding: 28px 32px;
           display: flex;
           flex-direction: column;
           justify-content: center;
+          min-width: 0;
+        }
+        
+        .card-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+        
+        /* Avatar blocks with overlaid names */
+        .card-avatars {
+          display: flex;
+          gap: 16px;
+        }
+        
+        .avatar-block {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
           cursor: pointer;
         }
         
-        .card-header-row {
-          display: flex;
-          gap: 16px;
-          align-items: flex-start;
+        .avatar-block:hover .avatar-circle {
+          border-color: #06C167;
+          transform: scale(1.05);
         }
         
-        .card-avatars {
-          display: flex;
-          gap: 8px;
-          flex-shrink: 0;
-        }
-        
-        .avatar-wrap {
-          width: 44px;
-          height: 44px;
-          border-radius: 12px;
+        .avatar-circle {
+          width: 56px;
+          height: 56px;
+          border-radius: 50%;
           overflow: hidden;
           background: #2a2a2a;
           display: flex;
           align-items: center;
           justify-content: center;
-          flex-shrink: 0;
+          border: 2px solid #333;
+          transition: all 0.2s ease;
         }
         
-        .avatar-wrap.avatar-driver {
-          border: 2px solid rgba(6,193,103,0.5);
+        .avatar-circle-driver {
+          border-color: rgba(6, 193, 103, 0.4);
         }
         
         .avatar-img {
@@ -630,71 +659,38 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .avatar-fallback {
-          font-size: 18px;
+          font-size: 20px;
           font-weight: 600;
           color: #888;
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 100%;
-          height: 100%;
         }
         
-        .avatar-driver .avatar-fallback {
-          font-size: 20px;
-        }
-        
-        .card-header-content {
-          flex: 1;
-          min-width: 0;
-        }
-        
-        .card-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 8px;
-        }
-        
-        .card-phone {
+        .avatar-name {
           font-size: 13px;
-          color: #06C167;
-          font-variant-numeric: tabular-nums;
-        }
-        
-        .account-name {
-          font-size: 15px;
           font-weight: 500;
           color: #fff;
+          text-align: center;
+          max-width: 80px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         
-        button.account-name {
-          background: transparent;
-          border: none;
-          padding: 0;
-          margin: 0;
-          font: inherit;
-          color: inherit;
-          cursor: pointer;
-          appearance: none;
-          -webkit-appearance: none;
-        }
-        button.account-name:hover,
-        button.account-name:focus {
-          background: transparent;
-        }
-        button.account-name:focus-visible {
-          outline: 2px solid #06C167;
-          outline-offset: 2px;
+        .avatar-block-driver .avatar-name {
+          color: #06C167;
         }
         
         .status-badge {
           padding: 6px 14px;
-          border-radius: 500px;
-          font-size: 12px;
-          font-weight: 600;
+          border-radius: 100px;
+          font-size: 11px;
+          font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.5px;
+          letter-spacing: 0.8px;
+          white-space: nowrap;
+          flex-shrink: 0;
         }
         
         .status-active {
@@ -703,8 +699,8 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .status-inactive {
-          background: #333;
-          color: #888;
+          background: rgba(255,255,255,0.08);
+          color: #666;
         }
         
         .status-error {
@@ -712,51 +708,46 @@ class UberEatsPanel extends HTMLElement {
           color: #fff;
         }
         
-        .card-details {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        
+        /* One-line info row */
         .card-oneline {
           display: flex;
           flex-wrap: wrap;
           align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          color: #ccc;
+          gap: 6px 12px;
+          font-size: 14px;
+          line-height: 1.6;
+          margin-bottom: 12px;
         }
         
-        .card-oneline .card-oneline-label {
-          color: #888;
-          flex-shrink: 0;
+        .card-oneline-label {
+          color: #666;
         }
-        .card-oneline .card-oneline-sep {
-          color: #555;
-          flex-shrink: 0;
-        }
-        .card-oneline .card-oneline-value {
-          color: #ccc;
-        }
-        
-        .card-timeline {
-          font-size: 15px;
+        .card-oneline-value {
           color: #fff;
           font-weight: 500;
-          line-height: 1.4;
-          word-wrap: break-word;
-          overflow-wrap: break-word;
+        }
+        .card-oneline-sep {
+          color: #444;
         }
         
-        /* Card stage progress bar - full width of info column */
+        /* Timeline message */
+        .card-timeline {
+          font-size: 15px;
+          color: #999;
+          line-height: 1.5;
+          margin-bottom: 4px;
+        }
+        
+        .card-timeline.waiting {
+          color: #555;
+          font-style: italic;
+        }
+        
+        /* Progress bar */
         .card-stage-progress {
           display: flex;
-          align-items: center;
           gap: 6px;
-          width: 100%;
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid #2a2a2a;
+          margin-top: 20px;
         }
         
         .card-stage-bar {
@@ -764,8 +755,7 @@ class UberEatsPanel extends HTMLElement {
           height: 6px;
           background: #2a2a2a;
           border-radius: 3px;
-          overflow: hidden;
-          transition: background 0.25s ease;
+          transition: background 0.3s ease;
         }
         
         .card-stage-bar.active {
@@ -773,43 +763,22 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .card-stage-bar.current {
-          background: linear-gradient(90deg, #06C167 50%, #2a2a2a 50%);
-          animation: card-progress-pulse 1.5s ease-in-out infinite;
+          background: linear-gradient(90deg, #06C167 60%, #2a2a2a 60%);
+          animation: progress-pulse 1.8s ease-in-out infinite;
         }
         
-        @keyframes card-progress-pulse {
+        @keyframes progress-pulse {
           0%, 100% { opacity: 1; }
-          50% { opacity: 0.75; }
+          50% { opacity: 0.65; }
         }
         
-        .detail-item {
-          display: flex;
-          flex-direction: column;
-        }
-        
-        .detail-label {
-          font-size: 11px;
-          color: #666;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-bottom: 4px;
-        }
-        
-        .detail-value {
-          font-size: 15px;
-          color: #fff;
-          font-weight: 500;
-        }
-        
-        .detail-value.highlight {
-          color: #06C167;
-          font-size: 18px;
-        }
-        
+        /* Card Map Section */
         .card-map {
-          height: 180px;
+          width: 280px;
+          min-height: 200px;
           background: #111;
           position: relative;
+          flex-shrink: 0;
         }
         
         .card-map iframe {
@@ -825,17 +794,19 @@ class UberEatsPanel extends HTMLElement {
           z-index: 1;
           cursor: pointer;
         }
+        
         .map-overlay {
           position: absolute;
-          top: 8px;
-          right: 8px;
+          bottom: 12px;
+          left: 12px;
           z-index: 2;
-          background: rgba(0,0,0,0.8);
-          padding: 6px 12px;
-          border-radius: 6px;
+          background: rgba(0,0,0,0.85);
+          padding: 8px 14px;
+          border-radius: 8px;
           font-size: 12px;
-          font-weight: 500;
+          font-weight: 600;
           color: #06C167;
+          backdrop-filter: blur(4px);
           pointer-events: none;
         }
         
@@ -1453,6 +1424,55 @@ class UberEatsPanel extends HTMLElement {
           margin-bottom: 8px;
           display: block;
         }
+        .player-setting-toggle-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .player-setting-label {
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #888;
+        }
+        .tts-toggle.small {
+          width: 36px;
+          height: 20px;
+          min-width: 36px;
+        }
+        .tts-toggle.small .tts-toggle-knob {
+          width: 14px;
+          height: 14px;
+          left: 3px;
+          top: 3px;
+        }
+        .tts-toggle.small.enabled .tts-toggle-knob {
+          left: 19px;
+        }
+        .player-lang-input,
+        .player-opts-editor {
+          width: 100%;
+          margin-top: 8px;
+          padding: 10px 12px;
+          border: 1px solid #333;
+          border-radius: 8px;
+          background: #111;
+          color: #fff;
+          font-size: 14px;
+          font-family: inherit;
+        }
+        .player-opts-editor {
+          min-height: 60px;
+          resize: vertical;
+          font-family: monospace;
+          font-size: 12px;
+        }
+        .player-lang-input:focus,
+        .player-opts-editor:focus {
+          border-color: #06C167;
+          outline: none;
+        }
         .media-player-volume label {
           font-size: 11px;
           text-transform: uppercase;
@@ -2019,14 +2039,13 @@ class UberEatsPanel extends HTMLElement {
     const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
     const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
     const mapUrl = this._getMapUrl(lat, lon, 0.001);
-    const mapLabel = isActive && !noDriver ? "📍 Driver" : "🏠 Home";
+    const mapLabel = isActive && !noDriver ? "📍 Driver Location" : "🏠 Home";
 
     const timelineSummary = (account.order_status || account.order_status_description || "").trim();
     const timelineDisplay = timelineSummary && timelineSummary !== "Unknown" && timelineSummary !== "No Active Order"
       ? timelineSummary
       : this._displayOrderStatus(account);
     const driverDisplay = noDriver ? "Not assigned" : account.driver_name;
-    const driverPhoneFormatted = (account.driver_phone_formatted && this._formatDriverPhone(account.driver_phone_formatted)) || "";
     const etaDisplay =
       account.driver_eta && account.driver_eta !== "No ETA" && account.driver_eta !== "No ETA Available"
         ? account.driver_eta
@@ -2034,6 +2053,7 @@ class UberEatsPanel extends HTMLElement {
 
     const userPic = account.user_picture_url;
     const driverPic = account.driver_picture_url;
+    const accountInitial = (account.account_name || "?").charAt(0).toUpperCase();
 
     const cardStages = ["preparing", "picked up", "en route", "arriving"];
     const cardStageIdx = cardStages.findIndex(s => (account.order_stage || "").toLowerCase().includes(s));
@@ -2043,60 +2063,56 @@ class UberEatsPanel extends HTMLElement {
       <div class="${cardClass}" data-entry-id="${account.entry_id}">
         <div class="card-main">
           <div class="card-info">
-            <div class="card-header-row">
+            <div class="card-header">
               <div class="card-avatars">
-                <div class="avatar-wrap" title="Account">
-                  ${userPic ? `<img class="avatar-img" src="${esc(userPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
-                  <div class="avatar-fallback" style="${userPic ? "display:none" : ""}">${esc((account.account_name || "?").charAt(0).toUpperCase())}</div>
+                <div class="avatar-block" data-entry-id="${account.entry_id}">
+                  <div class="avatar-circle">
+                    ${userPic ? `<img src="${esc(userPic)}" alt="" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+                    <span class="avatar-fallback" style="${userPic ? "display:none" : ""}">${accountInitial}</span>
+                  </div>
+                  <span class="avatar-name">${esc(account.account_name)}</span>
                 </div>
                 ${isActive && !noDriver ? `
-                <div class="avatar-wrap avatar-driver" title="Driver">
-                  ${driverPic ? `<img class="avatar-img" src="${esc(driverPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
-                  <div class="avatar-fallback" style="${driverPic ? "display:none" : ""}">🚗</div>
+                <div class="avatar-block avatar-block-driver">
+                  <div class="avatar-circle avatar-circle-driver">
+                    ${driverPic ? `<img src="${esc(driverPic)}" alt="" class="avatar-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+                    <span class="avatar-fallback" style="${driverPic ? "display:none" : ""}">🚗</span>
+                  </div>
+                  <span class="avatar-name">${esc(driverDisplay)}</span>
                 </div>
                 ` : ""}
               </div>
-              <div class="card-header-content">
-                <div class="card-header">
-                  <button type="button" class="account-name" data-entry-id="${account.entry_id}" aria-label="View details for ${esc(account.account_name)}">${esc(account.account_name)}</button>
-                  <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
-                    ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
-                  </span>
-                </div>
-                ${isActive ? `
-                  <div class="card-oneline">
-                    <span class="card-oneline-label">Restaurant:</span>
-                    <span class="card-oneline-value">${esc(account.restaurant_name || "—")}</span>
-                    <span class="card-oneline-sep">·</span>
-                    <span class="card-oneline-label">Driver:</span>
-                    <span class="card-oneline-value">${esc(driverDisplay)}</span>
-                    ${driverPhoneFormatted ? `<span class="card-oneline-sep">·</span><span class="card-phone">${esc(driverPhoneFormatted)}</span>` : ""}
-                    <span class="card-oneline-sep">·</span>
-                    <span class="card-oneline-label">ETA:</span>
-                    <span class="card-oneline-value">${esc(etaDisplay)}</span>
-                  </div>
-                  <div class="card-timeline">${esc(timelineDisplay)}</div>
-                  <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
-                    ${cardStages.map((_, i) => {
-                      const completed = i < safeStageIdx;
-                      const current = i === safeStageIdx;
-                      return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
-                    }).join("")}
-                  </div>
-                ` : `
-                  <div class="card-timeline" style="color: #888;">Waiting for orders...</div>
-                `}
-              </div>
+              <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
+                ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
+              </span>
             </div>
+            ${isActive ? `
+              <div class="card-oneline">
+                <span class="card-oneline-label">Restaurant:</span>
+                <span class="card-oneline-value">${esc(account.restaurant_name || "—")}</span>
+                <span class="card-oneline-sep">·</span>
+                <span class="card-oneline-label">ETA:</span>
+                <span class="card-oneline-value">${esc(etaDisplay)}</span>
+              </div>
+              <div class="card-timeline">${esc(timelineDisplay)}</div>
+              <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
+                ${cardStages.map((_, i) => {
+                  const completed = i < safeStageIdx;
+                  const current = i === safeStageIdx;
+                  return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
+                }).join("")}
+              </div>
+            ` : `
+              <div class="card-timeline waiting">Waiting for orders...</div>
+            `}
           </div>
-          
           <div class="card-map">
             ${mapUrl ? `
               <iframe src="${mapUrl}" title="Location Map"></iframe>
               <div class="card-map-click-overlay" aria-hidden="true"></div>
               <div class="map-overlay">${mapLabel}</div>
             ` : `
-              <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;">
+              <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:13px;">
                 Map unavailable
               </div>
             `}
@@ -2300,13 +2316,27 @@ class UberEatsPanel extends HTMLElement {
       `<option value="${e.entity_id}">${e.name || e.entity_id}</option>`
     ).join("");
 
-    // Each media player: collapsible sub-card with settings
+    // Per-player settings (stored in tts_media_player_settings or derived from global)
+    const perPlayerSettings = settings.tts_media_player_settings || {};
+
+    // Each media player: collapsible sub-card with full settings
     const mediaPlayersHtml = selectedMedia.map((entityId) => {
       const ent = mediaList.find((e) => e.entity_id === entityId);
       const name = ent ? (ent.name || entityId) : entityId;
+      const playerSettings = perPlayerSettings[entityId] || {};
       const vol = typeof perPlayerVols[entityId] === "number" ? perPlayerVols[entityId] : defaultVol;
+      const playerCache = playerSettings.cache !== undefined ? playerSettings.cache : ttsCache;
+      const playerLang = playerSettings.language || "";
+      const playerOpts = playerSettings.options || {};
+      const playerOptsYaml = Object.keys(playerOpts).length > 0
+        ? Object.entries(playerOpts).map(([k, v]) => `${k}: ${v}`).join("\n")
+        : "";
+      const playerLangEnabled = !!playerLang || (this._playerLangEnabled || {})[entityId];
+      const playerOptsEnabled = Object.keys(playerOpts).length > 0 || (this._playerOptsEnabled || {})[entityId];
+      const isExpanded = !!(this._expandedPlayers || {})[entityId];
+
       return `
-        <div class="media-player-item" data-entity-id="${entityId}">
+        <div class="media-player-item${isExpanded ? " expanded" : ""}" data-entity-id="${entityId}">
           <div class="media-player-header" data-toggle-player="${entityId}">
             <svg class="media-player-expand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
             <span class="media-player-name">${esc(name)}</span>
@@ -2321,8 +2351,24 @@ class UberEatsPanel extends HTMLElement {
               </div>
             </div>
             <div class="media-player-setting">
-              <label>Entity ID</label>
-              <div style="font-family: monospace; font-size: 12px; color: #666; word-break: break-all;">${entityId}</div>
+              <div class="player-setting-toggle-row">
+                <span class="player-setting-label">Cache</span>
+                <div class="tts-toggle small ${playerCache ? "enabled" : ""}" data-player-cache="${entityId}" data-entry-id="${acc.entry_id}" role="button" tabindex="0"><span class="tts-toggle-knob"></span></div>
+              </div>
+            </div>
+            <div class="media-player-setting">
+              <div class="player-setting-toggle-row">
+                <span class="player-setting-label">Language</span>
+                <div class="tts-toggle small ${playerLangEnabled ? "enabled" : ""}" data-player-lang-toggle="${entityId}" data-entry-id="${acc.entry_id}" role="button" tabindex="0"><span class="tts-toggle-knob"></span></div>
+              </div>
+              ${playerLangEnabled ? `<input type="text" class="player-lang-input" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" value="${esc(playerLang)}" placeholder="e.g. en, es, fr" ${enabled ? "" : "disabled"} />` : ""}
+            </div>
+            <div class="media-player-setting">
+              <div class="player-setting-toggle-row">
+                <span class="player-setting-label">Options</span>
+                <div class="tts-toggle small ${playerOptsEnabled ? "enabled" : ""}" data-player-opts-toggle="${entityId}" data-entry-id="${acc.entry_id}" role="button" tabindex="0"><span class="tts-toggle-knob"></span></div>
+              </div>
+              ${playerOptsEnabled ? `<textarea class="player-opts-editor" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" placeholder="voice: en_US-trump-high" ${enabled ? "" : "disabled"}>${esc(playerOptsYaml)}</textarea>` : ""}
             </div>
           </div>
         </div>`;
@@ -2369,43 +2415,6 @@ class UberEatsPanel extends HTMLElement {
               <label>Message Prefix</label>
               <input type="text" id="tts-prefix-input" value="${esc(prefix)}" placeholder="Message from Uber Eats" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
             </div>
-            <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
-              <div class="tts-toggle-row" style="width:100%">
-                <div style="flex:1">
-                  <strong style="color:#fff;font-size:14px">Cache</strong>
-                  <span style="font-size:12px;color:#888;display:block;margin-top:2px">Stores this message locally so that when the text is requested again, the output can be produced more quickly.</span>
-                </div>
-                <div class="tts-toggle ${ttsCache ? "enabled" : ""}" id="tts-cache-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${ttsCache}"><span class="tts-toggle-knob"></span></div>
-              </div>
-            </div>
-            <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
-              <div class="tts-toggle-row" style="width:100%">
-                <div style="flex:1">
-                  <strong style="color:#fff;font-size:14px">Language</strong>
-                  <span style="font-size:12px;color:#888;display:block;margin-top:2px">Language to use for speech generation.</span>
-                </div>
-                <div class="tts-toggle ${langEnabled ? "enabled" : ""}" id="tts-language-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${langEnabled}"><span class="tts-toggle-knob"></span></div>
-              </div>
-            </div>
-            ${langEnabled ? `
-            <div class="tts-toggle-input-content ${enabled ? "" : "disabled"}">
-              <input type="text" id="tts-language-input" value="${esc(ttsLanguage)}" placeholder="e.g. en, es, fr" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"} />
-            </div>
-            ` : ""}
-            <div class="tts-checkbox-field ${enabled ? "" : "disabled"}">
-              <div class="tts-toggle-row" style="width:100%">
-                <div style="flex:1">
-                  <strong style="color:#fff;font-size:14px">Options</strong>
-                  <span style="font-size:12px;color:#888;display:block;margin-top:2px">A dictionary containing integration-specific options (e.g. voice for Piper).</span>
-                </div>
-                <div class="tts-toggle ${optionsEnabled ? "enabled" : ""}" id="tts-options-toggle" data-entry-id="${acc.entry_id}" role="button" tabindex="0" aria-pressed="${optionsEnabled}"><span class="tts-toggle-knob"></span></div>
-              </div>
-            </div>
-            ${optionsEnabled ? `
-            <div class="tts-toggle-input-content ${enabled ? "" : "disabled"}">
-              <textarea id="tts-options-editor" class="tts-options-editor" data-entry-id="${acc.entry_id}" placeholder="voice: en_US-trump-high" ${enabled ? "" : "disabled"}>${esc(ttsOptionsYaml)}</textarea>
-            </div>
-            ` : ""}
             <div class="tts-test-section ${enabled ? "" : "disabled"}">
               <input type="text" id="tts-test-message" class="tts-test-msg" placeholder="Test message..." value="This is a test from Uber Eats" ${enabled ? "" : "disabled"} />
               <button type="button" id="tts-test-btn" class="tts-test-btn" ${enabled && selectedMedia.length > 0 && settings.tts_entity_id ? "" : "disabled"}>
@@ -2659,6 +2668,20 @@ class UberEatsPanel extends HTMLElement {
     }
   }
 
+  async _fetchUserProfile(entryId) {
+    if (!this._hass || !entryId) return;
+    try {
+      const result = await this._hass.callWS({
+        type: "uber_eats/get_user_profile",
+        entry_id: entryId,
+      });
+      this._userProfile = result || null;
+    } catch (err) {
+      console.error("Failed to fetch user profile:", err);
+      this._userProfile = null;
+    }
+  }
+
   _toggleSidebar() {
     const event = new Event("hass-toggle-menu", { bubbles: true, composed: true });
     this.dispatchEvent(event);
@@ -2809,9 +2832,13 @@ class UberEatsPanel extends HTMLElement {
       header.addEventListener("click", (e) => {
         // Don't toggle if clicking the remove button
         if (e.target.closest(".media-player-remove")) return;
+        const entityId = header.dataset.togglePlayer;
         const item = header.closest(".media-player-item");
-        if (item) {
+        if (item && entityId) {
+          const wasExpanded = item.classList.contains("expanded");
           item.classList.toggle("expanded");
+          // Persist state so re-render doesn't lose it
+          this._expandedPlayers = { ...this._expandedPlayers, [entityId]: !wasExpanded };
         }
       });
     });
@@ -2862,114 +2889,113 @@ class UberEatsPanel extends HTMLElement {
       });
     });
 
-    // Cache toggle
-    const cacheToggle = this.shadowRoot.querySelector("#tts-cache-toggle");
-    if (cacheToggle) {
-      const entryId = cacheToggle.dataset.entryId;
-      const toggleHandler = () => {
-        const next = !(this._ttsSettings?.tts_cache !== false);
-        const settings = { ...this._ttsSettings, tts_cache: next };
+    // Per-player cache toggles
+    this.shadowRoot.querySelectorAll("[data-player-cache]").forEach((toggle) => {
+      const entityId = toggle.dataset.playerCache;
+      const entryId = toggle.dataset.entryId;
+      const handler = () => {
+        const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
+        const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
+        playerSettings.cache = !(playerSettings.cache !== false);
+        perPlayerSettings[entityId] = playerSettings;
+        const settings = { ...this._ttsSettings, tts_media_player_settings: perPlayerSettings };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       };
-      cacheToggle.addEventListener("click", toggleHandler);
-      cacheToggle.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHandler(); }
-      });
-    }
+      toggle.addEventListener("click", handler);
+    });
 
-    // Language toggle (enable/disable)
-    const langToggle = this.shadowRoot.querySelector("#tts-language-toggle");
-    if (langToggle) {
-      const entryId = langToggle.dataset.entryId;
-      const toggleHandler = () => {
-        const currentLang = this._ttsSettings?.tts_language || "";
-        const isEnabled = currentLang.length > 0;
-        if (isEnabled) {
-          // Currently enabled, disable it (clear language)
-          const settings = { ...this._ttsSettings, tts_language: "" };
+    // Per-player language toggles
+    this.shadowRoot.querySelectorAll("[data-player-lang-toggle]").forEach((toggle) => {
+      const entityId = toggle.dataset.playerLangToggle;
+      const entryId = toggle.dataset.entryId;
+      const handler = () => {
+        const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
+        const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
+        const hasLang = !!playerSettings.language;
+        if (hasLang) {
+          // Disable - clear language
+          playerSettings.language = "";
+          perPlayerSettings[entityId] = playerSettings;
+          this._playerLangEnabled = { ...this._playerLangEnabled, [entityId]: false };
+          const settings = { ...this._ttsSettings, tts_media_player_settings: perPlayerSettings };
           this._saveTtsSettings(entryId, settings).then(() => this._render());
         } else {
-          // Currently disabled, enable it (render will show input)
-          // We use a special flag to show the input even if language is empty
-          this._langEnabled = true;
+          // Enable - show input
+          this._playerLangEnabled = { ...this._playerLangEnabled, [entityId]: true };
           this._render();
         }
       };
-      langToggle.addEventListener("click", toggleHandler);
-      langToggle.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHandler(); }
-      });
-    }
+      toggle.addEventListener("click", handler);
+    });
 
-    // Language input
-    const langInput = this.shadowRoot.querySelector("#tts-language-input");
-    if (langInput) {
+    // Per-player language inputs
+    this.shadowRoot.querySelectorAll(".player-lang-input").forEach((input) => {
+      const entityId = input.dataset.entityId;
+      const entryId = input.dataset.entryId;
       let debounceTimer;
-      langInput.addEventListener("input", () => {
+      input.addEventListener("input", () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          const entryId = langInput.dataset.entryId;
-          const settings = { ...this._ttsSettings, tts_language: langInput.value || "" };
-          this._saveTtsSettings(entryId, settings).then(() => {
-            // Don't re-render, just save
-          });
+          const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
+          const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
+          playerSettings.language = input.value || "";
+          perPlayerSettings[entityId] = playerSettings;
+          const settings = { ...this._ttsSettings, tts_media_player_settings: perPlayerSettings };
+          this._saveTtsSettings(entryId, settings);
         }, 600);
       });
-      // Save on blur
-      langInput.addEventListener("blur", () => {
-        const entryId = langInput.dataset.entryId;
-        const settings = { ...this._ttsSettings, tts_language: langInput.value || "" };
-        this._saveTtsSettings(entryId, settings);
-      });
-    }
+    });
 
-    // Options toggle (enable/disable)
-    const optToggle = this.shadowRoot.querySelector("#tts-options-toggle");
-    if (optToggle) {
-      const entryId = optToggle.dataset.entryId;
-      const toggleHandler = () => {
-        const currentOpts = this._ttsSettings?.tts_options || {};
-        const isEnabled = Object.keys(currentOpts).length > 0;
-        if (isEnabled) {
-          // Currently enabled, disable it (clear options)
-          const settings = { ...this._ttsSettings, tts_options: {} };
+    // Per-player options toggles
+    this.shadowRoot.querySelectorAll("[data-player-opts-toggle]").forEach((toggle) => {
+      const entityId = toggle.dataset.playerOptsToggle;
+      const entryId = toggle.dataset.entryId;
+      const handler = () => {
+        const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
+        const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
+        const hasOpts = playerSettings.options && Object.keys(playerSettings.options).length > 0;
+        if (hasOpts) {
+          // Disable - clear options
+          playerSettings.options = {};
+          perPlayerSettings[entityId] = playerSettings;
+          this._playerOptsEnabled = { ...this._playerOptsEnabled, [entityId]: false };
+          const settings = { ...this._ttsSettings, tts_media_player_settings: perPlayerSettings };
           this._saveTtsSettings(entryId, settings).then(() => this._render());
         } else {
-          // Currently disabled, enable it (render will show editor)
-          this._optEnabled = true;
+          // Enable - show editor
+          this._playerOptsEnabled = { ...this._playerOptsEnabled, [entityId]: true };
           this._render();
         }
       };
-      optToggle.addEventListener("click", toggleHandler);
-      optToggle.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHandler(); }
-      });
-    }
+      toggle.addEventListener("click", handler);
+    });
 
-    // Options YAML editor
-    const optEditor = this.shadowRoot.querySelector("#tts-options-editor");
-    if (optEditor) {
+    // Per-player options editors
+    this.shadowRoot.querySelectorAll(".player-opts-editor").forEach((editor) => {
+      const entityId = editor.dataset.entityId;
+      const entryId = editor.dataset.entryId;
       let debounceTimer;
-      // Allow tab key inside textarea
-      optEditor.addEventListener("keydown", (e) => {
+      editor.addEventListener("keydown", (e) => {
         if (e.key === "Tab") {
           e.preventDefault();
-          const start = optEditor.selectionStart;
-          const end = optEditor.selectionEnd;
-          optEditor.value = optEditor.value.substring(0, start) + "  " + optEditor.value.substring(end);
-          optEditor.selectionStart = optEditor.selectionEnd = start + 2;
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd;
+          editor.value = editor.value.substring(0, start) + "  " + editor.value.substring(end);
+          editor.selectionStart = editor.selectionEnd = start + 2;
         }
       });
-      optEditor.addEventListener("input", () => {
+      editor.addEventListener("input", () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          const entryId = optEditor.dataset.entryId;
-          const parsed = this._parseYamlOptions(optEditor.value);
-          const settings = { ...this._ttsSettings, tts_options: parsed };
-          this._saveTtsSettings(entryId, settings).then(() => {});
+          const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
+          const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
+          playerSettings.options = this._parseYamlOptions(editor.value);
+          perPlayerSettings[entityId] = playerSettings;
+          const settings = { ...this._ttsSettings, tts_media_player_settings: perPlayerSettings };
+          this._saveTtsSettings(entryId, settings);
         }, 800);
       });
-    }
+    });
 
     // Test TTS button
     const testBtn = this.shadowRoot.querySelector("#tts-test-btn");
@@ -2982,10 +3008,12 @@ class UberEatsPanel extends HTMLElement {
         const selectedMedia = Array.isArray(settings.tts_media_players) ? settings.tts_media_players : [];
         const ttsEntity = settings.tts_entity_id || "";
         const perPlayerVols = settings.tts_media_player_volumes || {};
+        const perPlayerSettings = settings.tts_media_player_settings || {};
         const defaultVol = typeof settings.tts_volume === "number" ? settings.tts_volume : 0.5;
-        const ttsCache = settings.tts_cache !== false;
-        const ttsLanguage = (settings.tts_language || "").trim() || undefined;
-        const ttsOptions = settings.tts_options && Object.keys(settings.tts_options).length > 0 ? settings.tts_options : undefined;
+        // Fallback to global settings (if per-player not set)
+        const globalCache = settings.tts_cache !== false;
+        const globalLanguage = (settings.tts_language || "").trim() || undefined;
+        const globalOptions = settings.tts_options && Object.keys(settings.tts_options).length > 0 ? settings.tts_options : undefined;
 
         if (!ttsEntity) {
           if (statusEl) { statusEl.textContent = "No TTS engine selected."; statusEl.className = "tts-test-status error"; }
@@ -2999,10 +3027,15 @@ class UberEatsPanel extends HTMLElement {
         testBtn.disabled = true;
         if (statusEl) { statusEl.textContent = "Sending..."; statusEl.className = "tts-test-status"; }
 
-        // Send test to each selected media player
+        // Send test to each selected media player using per-player settings
         let allOk = true;
         for (const mp of selectedMedia) {
           const vol = typeof perPlayerVols[mp] === "number" ? perPlayerVols[mp] : defaultVol;
+          const playerSettings = perPlayerSettings[mp] || {};
+          const playerCache = playerSettings.cache !== undefined ? playerSettings.cache : globalCache;
+          const playerLang = playerSettings.language || globalLanguage || "";
+          const playerOpts = (playerSettings.options && Object.keys(playerSettings.options).length > 0)
+            ? playerSettings.options : (globalOptions || {});
           try {
             await this._hass.callWS({
               type: "uber_eats/test_tts",
@@ -3010,9 +3043,9 @@ class UberEatsPanel extends HTMLElement {
               media_player_id: mp,
               message,
               volume_level: vol,
-              cache: ttsCache,
-              language: ttsLanguage || "",
-              options: ttsOptions || {},
+              cache: playerCache,
+              language: playerLang,
+              options: playerOpts,
             });
           } catch (err) {
             allOk = false;

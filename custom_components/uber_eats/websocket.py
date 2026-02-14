@@ -22,6 +22,7 @@ from .const import (
     CONF_TTS_MESSAGE_PREFIX,
     CONF_TTS_VOLUME,
     CONF_TTS_MEDIA_PLAYER_VOLUMES,
+    CONF_TTS_MEDIA_PLAYER_SETTINGS,
     CONF_TTS_CACHE,
     CONF_TTS_LANGUAGE,
     CONF_TTS_OPTIONS,
@@ -66,6 +67,7 @@ def async_setup(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_automations)
     websocket_api.async_register_command(hass, websocket_test_tts)
     websocket_api.async_register_command(hass, websocket_get_past_orders)
+    websocket_api.async_register_command(hass, websocket_get_user_profile)
 
 
 @websocket_api.websocket_command(
@@ -440,6 +442,7 @@ async def websocket_get_tts_settings(
         "tts_message_prefix": options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX),
         "tts_volume": float(options.get(CONF_TTS_VOLUME, DEFAULT_TTS_VOLUME)),
         "tts_media_player_volumes": options.get(CONF_TTS_MEDIA_PLAYER_VOLUMES, {}),
+        "tts_media_player_settings": options.get(CONF_TTS_MEDIA_PLAYER_SETTINGS, {}),
         "tts_cache": options.get(CONF_TTS_CACHE, True),
         "tts_language": options.get(CONF_TTS_LANGUAGE, ""),
         "tts_options": options.get(CONF_TTS_OPTIONS, {}),
@@ -461,6 +464,7 @@ async def websocket_get_tts_settings(
         vol.Required("tts_message_prefix"): str,
         vol.Optional("tts_volume"): vol.Any(int, float),
         vol.Optional("tts_media_player_volumes"): dict,
+        vol.Optional("tts_media_player_settings"): dict,
         vol.Optional("tts_cache"): bool,
         vol.Optional("tts_language"): str,
         vol.Optional("tts_options"): dict,
@@ -499,6 +503,16 @@ async def websocket_update_tts_settings(
             if isinstance(k, str) and k.startswith("media_player."):
                 vols[k] = max(0.0, min(1.0, float(v)))
         options[CONF_TTS_MEDIA_PLAYER_VOLUMES] = vols
+    if "tts_media_player_settings" in msg and msg["tts_media_player_settings"] is not None:
+        player_settings = {}
+        for k, v in (msg["tts_media_player_settings"] or {}).items():
+            if isinstance(k, str) and k.startswith("media_player.") and isinstance(v, dict):
+                player_settings[k] = {
+                    "cache": bool(v.get("cache", True)),
+                    "language": (v.get("language") or "").strip() if v.get("language") else "",
+                    "options": v.get("options", {}) if isinstance(v.get("options"), dict) else {},
+                }
+        options[CONF_TTS_MEDIA_PLAYER_SETTINGS] = player_settings
     if "tts_cache" in msg and msg["tts_cache"] is not None:
         options[CONF_TTS_CACHE] = bool(msg["tts_cache"])
     if "tts_language" in msg:
@@ -617,8 +631,41 @@ async def websocket_get_past_orders(
         return
 
     try:
-        orders = await coordinator.fetch_past_orders()
-        connection.send_result(msg["id"], {"orders": orders})
+        result = await coordinator.fetch_past_orders()
+        # result is {"orders": [...], "statistics": {...}}
+        connection.send_result(msg["id"], result)
     except Exception as e:
         _LOGGER.error("Failed to fetch past orders: %s", e)
+        connection.send_error(msg["id"], "fetch_failed", str(e))
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "uber_eats/get_user_profile",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_get_user_profile(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Get user profile for an account by calling Uber Eats API."""
+    entry_id = msg["entry_id"]
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if not entry:
+        connection.send_error(msg["id"], "not_found", "Config entry not found")
+        return
+
+    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not coordinator:
+        connection.send_error(msg["id"], "no_coordinator", "Coordinator not loaded")
+        return
+
+    try:
+        result = await coordinator.fetch_user_profile()
+        connection.send_result(msg["id"], result)
+    except Exception as e:
+        _LOGGER.error("Failed to fetch user profile: %s", e)
         connection.send_error(msg["id"], "fetch_failed", str(e))
