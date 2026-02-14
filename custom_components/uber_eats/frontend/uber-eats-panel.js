@@ -80,16 +80,36 @@ class UberEatsPanel extends HTMLElement {
   }
 
   _attachCardClickDelegation() {
-    if (this._cardClickDelegationAttached) return;
-    this._cardClickDelegationAttached = true;
-    this.shadowRoot.addEventListener("click", (e) => {
+    if (this._cardClickHandler) {
+      this.shadowRoot.removeEventListener("click", this._cardClickHandler);
+    }
+    this._cardClickHandler = (e) => {
+      const advancedHeader = e.target.closest("#advanced-settings-header");
+      if (advancedHeader) {
+        e.preventDefault();
+        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
+        this._render();
+        return;
+      }
       const card = e.target.closest(".account-card");
       if (!card) return;
       const entryId = card.getAttribute("data-entry-id") || card.dataset.entryId;
       if (!entryId || !this._hass) return;
       e.preventDefault();
       this._selectAccount(entryId);
-    });
+    };
+    this.shadowRoot.addEventListener("click", this._cardClickHandler);
+    if (this._cardKeydownHandler) {
+      this.shadowRoot.removeEventListener("keydown", this._cardKeydownHandler);
+    }
+    this._cardKeydownHandler = (e) => {
+      if (e.target.closest("#advanced-settings-header") && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
+        this._render();
+      }
+    };
+    this.shadowRoot.addEventListener("keydown", this._cardKeydownHandler);
   }
 
   async _loadAccounts() {
@@ -283,9 +303,9 @@ class UberEatsPanel extends HTMLElement {
     this._render();
   }
 
-  _getMapUrl(lat, lon, zoom = 15) {
+  _getMapUrl(lat, lon, zoomOrDelta = 15) {
     if (!lat || !lon) return null;
-    const delta = 0.003;
+    const delta = typeof zoomOrDelta === "number" && zoomOrDelta < 1 ? zoomOrDelta : (zoomOrDelta >= 17 ? 0.001 : zoomOrDelta >= 16 ? 0.0015 : 0.003);
     return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lon}`;
   }
 
@@ -551,8 +571,8 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .account-name {
-          font-size: 22px;
-          font-weight: 600;
+          font-size: 15px;
+          font-weight: 500;
           color: #fff;
         }
         
@@ -1384,7 +1404,7 @@ class UberEatsPanel extends HTMLElement {
     // Get map coordinates - always show map (home location if no order)
     const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
     const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
-    const mapUrl = this._getMapUrl(lat, lon);
+    const mapUrl = this._getMapUrl(lat, lon, 0.001);
     const mapLabel = isActive && !noDriver ? "📍 Driver Location" : "🏠 Home";
 
     // One-line: Restaurant Name, Driver name, ETA (with inline labels). Timeline summary below.
@@ -1931,21 +1951,7 @@ class UberEatsPanel extends HTMLElement {
       });
     }
 
-    // Advanced settings collapsible
-    const advancedHeader = this.shadowRoot.querySelector("#advanced-settings-header");
-    if (advancedHeader) {
-      const toggleCollapse = () => {
-        this._advancedSettingsCollapsed = !this._advancedSettingsCollapsed;
-        this._render();
-      };
-      advancedHeader.addEventListener("click", toggleCollapse);
-      advancedHeader.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          toggleCollapse();
-        }
-      });
-    }
+    // Advanced settings toggle is handled by _attachCardClickDelegation (delegation on shadowRoot)
 
     // TTS toggle
     const ttsToggle = this.shadowRoot.querySelector("#tts-toggle");
