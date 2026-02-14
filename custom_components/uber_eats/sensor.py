@@ -128,12 +128,21 @@ class UberEatsEntity(SensorEntity):
     def name(self) -> str:
         return f"{self._account_name} Uber Eats {self.translation_key.replace('_', ' ').title()}"
 
+# ---------- Helper for native_value (count or "No active order") ----------
+def _order_count_state(coordinator) -> str:
+    """Return 'No active order' or the count of active orders as string."""
+    orders = _get_orders(coordinator)
+    count = len(orders)
+    if count == 0:
+        return "No active order"
+    return str(count)
+
 # ---------- Sensors ----------
 class UberEatsOrderStage(UberEatsEntity):
     _attr_translation_key = "order_stage"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "order_stage", "No Active Order")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "order_stage", "No Active Order")
@@ -142,7 +151,7 @@ class UberEatsOrderStatus(UberEatsEntity):
     _attr_translation_key = "order_status"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "order_status", "No Active Order")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "order_status", "No Active Order")
@@ -151,7 +160,7 @@ class UberEatsDriverName(UberEatsEntity):
     _attr_translation_key = "driver_name"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "driver_name", "No Driver Assigned")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_name", "No Driver Assigned")
@@ -160,16 +169,7 @@ class UberEatsDriverETA(UberEatsEntity):
     _attr_translation_key = "driver_eta"
     @property
     def native_value(self) -> str:
-        orders = _get_orders(self.coordinator)
-        if not orders:
-            return "No ETT Available"
-        etas = []
-        for o in orders:
-            raw = o.get("driver_eta")
-            short = _format_short_time(raw)
-            if short:
-                etas.append(short)
-        return ", ".join(etas) if etas else "No ETT Available"
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         orders = _get_orders(self.coordinator)
@@ -185,25 +185,16 @@ class UberEatsOrderHistory(UberEatsEntity):
     _attr_translation_key = "order_history"
     @property
     def native_value(self) -> str:
-        return "Order History" if getattr(self.coordinator, "_order_history", None) else "No History Available"
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict:
-        return {"history": getattr(self.coordinator, "_order_history", [])}
+        return {"history": getattr(self.coordinator, "_order_history", []), "orders_count": _get_orders_count(self.coordinator)}
 
 class UberEatsRestaurantName(UberEatsEntity):
     _attr_translation_key = "restaurant_name"
     @property
     def native_value(self) -> str:
-        orders = _get_orders(self.coordinator)
-        if not orders:
-            return "No Restaurant"
-        names = []
-        for o in orders:
-            name = o.get("restaurant_name", "No Restaurant") or "No Restaurant"
-            clean = re.sub(r"[^a-zA-Z0-9\s]", "", name)
-            if clean and clean != "No Restaurant":
-                names.append(clean)
-        return ", ".join(names) if names else "No Restaurant"
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "restaurant_name", "No Restaurant")
@@ -212,7 +203,7 @@ class UberEatsOrderId(UberEatsEntity):
     _attr_translation_key = "order_id"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "order_id", "No Active Order")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "order_id", "No Active Order")
@@ -221,7 +212,7 @@ class UberEatsLatestArrival(UberEatsEntity):
     _attr_translation_key = "latest_arrival"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "latest_arrival", "No Latest Arrival")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "latest_arrival", "No Latest Arrival")
@@ -230,9 +221,8 @@ class UberEatsDriverLatitude(UberEatsEntity):
     _attr_translation_key = "driver_latitude"
     _attr_native_unit_of_measurement = "°"
     @property
-    def native_value(self) -> Any:
-        # Use first order's lat for main value
-        return self.coordinator.data.get("driver_location_lat", "No Active Order")
+    def native_value(self) -> str:
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_lat", "No Active Order")
@@ -241,9 +231,8 @@ class UberEatsDriverLongitude(UberEatsEntity):
     _attr_translation_key = "driver_longitude"
     _attr_native_unit_of_measurement = "°"
     @property
-    def native_value(self) -> Any:
-        # Use first order's lon for main value
-        return self.coordinator.data.get("driver_location_lon", "No Active Order")
+    def native_value(self) -> str:
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_lon", "No Active Order")
@@ -253,7 +242,7 @@ class UberEatsDriverLocationStreet(UberEatsEntity):
     _attr_translation_key = "driver_location_street"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "driver_location_street", "No Active Order")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_street", "No Active Order")
@@ -262,7 +251,7 @@ class UberEatsDriverLocationSuburb(UberEatsEntity):
     _attr_translation_key = "driver_location_suburb"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "driver_location_suburb", "Unknown")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_suburb", "Unknown")
@@ -271,7 +260,7 @@ class UberEatsDriverLocationQuarter(UberEatsEntity):
     _attr_translation_key = "driver_location_quarter"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "driver_location_quarter", "Unknown")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_quarter", "Unknown")
@@ -280,7 +269,7 @@ class UberEatsDriverLocationCounty(UberEatsEntity):
     _attr_translation_key = "driver_location_county"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "driver_location_county", "Unknown")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_county", "Unknown")
@@ -289,7 +278,7 @@ class UberEatsDriverLocationAddress(UberEatsEntity):
     _attr_translation_key = "driver_location_address"
     @property
     def native_value(self) -> str:
-        return _multi_order_value(self.coordinator, "driver_location_address", "Unknown")
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_address", "Unknown")
@@ -298,15 +287,7 @@ class UberEatsDriverETT(UberEatsEntity):
     _attr_translation_key = "driver_ett"
     @property
     def native_value(self) -> str:
-        orders = _get_orders(self.coordinator)
-        if not orders:
-            return "No ETT Available"
-        etts = []
-        for o in orders:
-            minutes = o.get("minutes_remaining", None)
-            if isinstance(minutes, int):
-                etts.append(f"{minutes} min")
-        return ", ".join(etts) if etts else "No ETT Available"
+        return _order_count_state(self.coordinator)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         orders = _get_orders(self.coordinator)

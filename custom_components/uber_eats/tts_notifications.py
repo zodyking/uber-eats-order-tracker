@@ -134,8 +134,12 @@ async def send_tts_if_idle(
     per_player_volumes: dict[str, float] | None = None,
     language: str | None = None,
     options: dict[str, Any] | None = None,
+    per_player_settings: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
-    """Send TTS to each media player in parallel; volume_set before each. No idle check."""
+    """Send TTS to each media player in parallel; volume_set before each. No idle check.
+    
+    Supports per-player TTS entities via per_player_settings[player_id]["tts_entity_id"].
+    """
     if not message or not message.strip():
         _LOGGER.warning("TTS skipped: empty message")
         return False
@@ -144,12 +148,9 @@ async def send_tts_if_idle(
         _LOGGER.warning("TTS skipped: no media players configured")
         return False
 
-    tts_entity = (tts_entity_id or "").strip()
-    if not tts_entity:
-        tts_entity = await _find_tts_entity(hass, language)
-    if not tts_entity:
-        _LOGGER.error("TTS skipped: no TTS entity configured or found")
-        return False
+    global_tts_entity = (tts_entity_id or "").strip()
+    if not global_tts_entity:
+        global_tts_entity = await _find_tts_entity(hass, language)
 
     valid_players = [mp for mp in media_player_ids if hass.states.get(mp) is not None]
     if not valid_players:
@@ -157,17 +158,26 @@ async def send_tts_if_idle(
         return False
 
     ppv = per_player_volumes or {}
+    pps = per_player_settings or {}
     msg = message.strip()
-    await asyncio.gather(
-        *[
-            _send_tts_to_one(
-                hass, tts_entity, mp, msg,
-                volume_level=ppv.get(mp, volume_level),
-                cache=cache,
-                language=language,
-                options=options,
-            )
-            for mp in valid_players
-        ]
-    )
+
+    async def _send_for_player(mp: str):
+        player_settings = pps.get(mp, {})
+        # Per-player TTS entity takes precedence
+        player_tts_entity = (player_settings.get("tts_entity_id") or "").strip() or global_tts_entity
+        if not player_tts_entity:
+            _LOGGER.warning("TTS skipped for %s: no TTS entity configured", mp)
+            return
+        player_cache = player_settings.get("cache", cache)
+        player_lang = player_settings.get("language") or language
+        player_opts = player_settings.get("options") or options
+        await _send_tts_to_one(
+            hass, player_tts_entity, mp, msg,
+            volume_level=ppv.get(mp, volume_level),
+            cache=player_cache if player_cache is not None else cache,
+            language=player_lang,
+            options=player_opts,
+        )
+
+    await asyncio.gather(*[_send_for_player(mp) for mp in valid_players])
     return True

@@ -16,6 +16,7 @@ from .const import (
     CONF_TTS_MESSAGE_PREFIX,
     CONF_TTS_VOLUME,
     CONF_TTS_MEDIA_PLAYER_VOLUMES,
+    CONF_TTS_MEDIA_PLAYER_SETTINGS,
     CONF_TTS_CACHE,
     CONF_TTS_LANGUAGE,
     CONF_TTS_OPTIONS,
@@ -63,13 +64,23 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
-        # Fetch and cache user profile if not already cached
-        if self._cached_user_profile is None:
-            try:
-                profile = await self.fetch_user_profile()
-                self._cached_user_profile = profile
-            except Exception as e:
-                _LOGGER.debug("Failed to cache user profile: %s", e)
+        # Systematically poll user profile on every update to detect changes
+        try:
+            profile = await self.fetch_user_profile()
+            old_profile = self._cached_user_profile or {}
+            self._cached_user_profile = profile
+            
+            # Check if name has changed and update account_name
+            new_first = profile.get("first_name", "")
+            new_last = profile.get("last_name", "")
+            if new_first or new_last:
+                new_name = f"{new_first} {new_last}".strip()
+                if new_name and new_name != self.account_name:
+                    _LOGGER.info("User profile name changed from '%s' to '%s'", self.account_name, new_name)
+                    self.account_name = new_name
+        except Exception as e:
+            _LOGGER.debug("Failed to fetch user profile: %s", e)
+            if self._cached_user_profile is None:
                 self._cached_user_profile = {"picture_url": None, "first_name": "", "last_name": ""}
 
         async with aiohttp.ClientSession() as session:
@@ -154,6 +165,9 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             "home_location": first.get("home_location", {"lat": self.hass.config.latitude or 0, "lon": self.hass.config.longitude or 0}),
                             "store_location": first.get("store_location"),
                             "driver_location_coords": first.get("driver_location_coords"),
+                            # User profile info for sensor names and display
+                            "user_first_name": (self._cached_user_profile or {}).get("first_name", ""),
+                            "user_last_name": (self._cached_user_profile or {}).get("last_name", ""),
                         })
 
                         # optional history (kept as you had)
@@ -313,6 +327,9 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "home_location": {"lat": home_lat, "lon": home_lon},
             "store_location": None,
             "driver_location_coords": None,
+            # User profile info
+            "user_first_name": (self._cached_user_profile or {}).get("first_name", ""),
+            "user_last_name": (self._cached_user_profile or {}).get("last_name", ""),
         }
 
     def _get_locale_code(self, time_zone):
@@ -624,6 +641,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         prefix = options.get(CONF_TTS_MESSAGE_PREFIX, DEFAULT_TTS_MESSAGE_PREFIX) or DEFAULT_TTS_MESSAGE_PREFIX
         volume = float(options.get(CONF_TTS_VOLUME, DEFAULT_TTS_VOLUME))
         per_player_volumes = options.get(CONF_TTS_MEDIA_PLAYER_VOLUMES, {})
+        per_player_settings = options.get(CONF_TTS_MEDIA_PLAYER_SETTINGS, {})
         tts_cache = options.get(CONF_TTS_CACHE, True)
         tts_language = (options.get(CONF_TTS_LANGUAGE) or "").strip() or None
         tts_options = options.get(CONF_TTS_OPTIONS) or None
@@ -694,6 +712,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                     per_player_volumes=per_player_volumes,
                     language=tts_language,
                     options=tts_options,
+                    per_player_settings=per_player_settings,
                 )
             )
 

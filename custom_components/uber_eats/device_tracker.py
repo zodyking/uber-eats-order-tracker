@@ -41,7 +41,7 @@ class UberEatsDriverTracker(CoordinatorEntity, TrackerEntity):
         self._account_name = account_name.replace(" ", "_")
         self._entry_id = entry_id
         self._attr_unique_id = f"uber_eats_{self._account_name}_driver_tracker"
-        self._attr_name = f"{self._account_name} Uber Eats Driver"
+        self._attr_name = f"{self._account_name} Uber Eats Order Tracker"
 
     def _is_driver_tracking_active(self) -> bool:
         """Check if driver tracking should be active (order active AND driver assigned)."""
