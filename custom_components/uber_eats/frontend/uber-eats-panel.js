@@ -294,6 +294,29 @@ class UberEatsPanel extends HTMLElement {
     return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lon}`;
   }
 
+  /** Build map URL with home, store, driver markers. Uses data URI with Leaflet for multi-marker. */
+  _getMultiMarkerMapUrl(account) {
+    const home = account.home_location || (this._hass?.config ? { lat: this._hass.config.latitude, lon: this._hass.config.longitude } : null);
+    const store = account.store_location;
+    const driver = account.driver_location_coords || (account.active && account.driver_location ? account.driver_location : null);
+    const points = [];
+    if (home && home.lat != null && home.lon != null) points.push({ lat: home.lat, lon: home.lon, type: "home" });
+    if (store && store.lat != null && store.lon != null) points.push({ lat: store.lat, lon: store.lon, type: "store" });
+    if (driver && driver.lat != null && driver.lon != null) points.push({ lat: driver.lat, lon: driver.lon, type: "driver" });
+    if (points.length === 0) return null;
+    const lats = points.map((p) => p.lat);
+    const lons = points.map((p) => p.lon);
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+    const span = Math.max(0.002, Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons)) * 1.5);
+    const ptsB64 = btoa(unescape(encodeURIComponent(JSON.stringify(points))));
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\\/script></head><body style="margin:0;background:#111"><div id="m" style="width:100%;height:100%;min-height:180px"></div><script>
+var m=L.map('m',{center:[${centerLat},${centerLon}],zoom:14,zoomControl:false});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM'}).addTo(m);L.control.zoom({position:'topleft'}).addTo(m);
+var icons={home:'🏠',store:'🍽️',driver:'🚗'};JSON.parse(decodeURIComponent(escape(atob('${ptsB64}')))).forEach(function(p){L.marker([p.lat,p.lon],{icon:L.divIcon({html:'<div style="font-size:22px;line-height:1;text-align:center;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))">'+icons[p.type]+'</div>',className:'',iconSize:[24,24],iconAnchor:[12,24]})}).addTo(m);});
+<\\/script></body></html>`;
+    return "data:text/html;base64," + btoa(unescape(encodeURIComponent(html)));
+  }
+
   /** Distance in feet between two lat/lon points (Haversine). */
   _distanceFeet(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
@@ -577,11 +600,71 @@ class UberEatsPanel extends HTMLElement {
           cursor: pointer;
         }
         
+        .card-header-row {
+          display: flex;
+          gap: 16px;
+          align-items: flex-start;
+        }
+        
+        .card-avatars {
+          display: flex;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+        
+        .avatar-wrap {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          overflow: hidden;
+          background: #2a2a2a;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        
+        .avatar-wrap.avatar-driver {
+          border: 2px solid rgba(6,193,103,0.5);
+        }
+        
+        .avatar-img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        .avatar-fallback {
+          font-size: 18px;
+          font-weight: 600;
+          color: #888;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          height: 100%;
+        }
+        
+        .avatar-driver .avatar-fallback {
+          font-size: 20px;
+        }
+        
+        .card-header-content {
+          flex: 1;
+          min-width: 0;
+        }
+        
         .card-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          margin-bottom: 12px;
+          margin-bottom: 8px;
+        }
+        
+        .card-phone {
+          font-size: 13px;
+          color: #06C167;
+          font-variant-numeric: tabular-nums;
         }
         
         .account-name {
@@ -903,7 +986,7 @@ class UberEatsPanel extends HTMLElement {
         
         .details-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: 1fr;
           gap: 24px;
           margin-bottom: 24px;
         }
@@ -1423,6 +1506,15 @@ class UberEatsPanel extends HTMLElement {
     `;
   }
 
+  /** Format phone for display: (XXX) XXX-XXXX */
+  _formatDriverPhone(phone) {
+    if (!phone || typeof phone !== "string") return "";
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    if (digits.length === 11 && digits[0] === "1") return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    return phone;
+  }
+
   _renderAccountCard(account) {
     const esc = (s) => this._escapeHtml(s ?? "");
     const isActive = account.active;
@@ -1433,24 +1525,27 @@ class UberEatsPanel extends HTMLElement {
       account.driver_name === "No Driver Assigned" ||
       account.driver_name === "Unknown";
 
-    // Get map coordinates - always show map (home location if no order)
-    const lat = account.driver_location?.lat || (this._hass?.config?.latitude || 0);
-    const lon = account.driver_location?.lon || (this._hass?.config?.longitude || 0);
-    const mapUrl = this._getMapUrl(lat, lon, 0.001);
-    const mapLabel = isActive && !noDriver ? "📍 Driver Location" : "🏠 Home";
+    const mapUrl = this._getMultiMarkerMapUrl(account) || this._getMapUrl(
+      account.driver_location?.lat || this._hass?.config?.latitude || 0,
+      account.driver_location?.lon || this._hass?.config?.longitude || 0,
+      0.001
+    );
+    const mapLabel = isActive && !noDriver ? "📍 Driver" : "🏠 Home";
 
-    // One-line: Restaurant Name, Driver name, ETA (with inline labels). Timeline summary below.
     const timelineSummary = (account.order_status || account.order_status_description || "").trim();
     const timelineDisplay = timelineSummary && timelineSummary !== "Unknown" && timelineSummary !== "No Active Order"
       ? timelineSummary
       : this._displayOrderStatus(account);
     const driverDisplay = noDriver ? "Not assigned" : account.driver_name;
+    const driverPhoneFormatted = (account.driver_phone_formatted && this._formatDriverPhone(account.driver_phone_formatted)) || "";
     const etaDisplay =
       account.driver_eta && account.driver_eta !== "No ETA" && account.driver_eta !== "No ETA Available"
         ? account.driver_eta
         : "—";
 
-    // Stage progress (4 segments: preparing → picked up → en route → arriving)
+    const userPic = account.user_picture_url;
+    const driverPic = account.driver_picture_url;
+
     const cardStages = ["preparing", "picked up", "en route", "arriving"];
     const cardStageIdx = cardStages.findIndex(s => (account.order_stage || "").toLowerCase().includes(s));
     const safeStageIdx = cardStageIdx >= 0 ? cardStageIdx : (isActive ? 0 : -1);
@@ -1459,36 +1554,50 @@ class UberEatsPanel extends HTMLElement {
       <div class="${cardClass}" data-entry-id="${account.entry_id}">
         <div class="card-main">
           <div class="card-info">
-            <div class="card-header">
-              <button type="button" class="account-name" data-entry-id="${account.entry_id}" aria-label="View details for ${esc(account.account_name)}">${esc(account.account_name)}</button>
-              <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
-                ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
-              </span>
-            </div>
-            
-            <div class="card-details">
-              ${isActive ? `
-                <div class="card-oneline">
-                  <span class="card-oneline-label">Restaurant Name:</span>
-                  <span class="card-oneline-value">${account.restaurant_name || "—"}</span>
-                  <span class="card-oneline-sep">·</span>
-                  <span class="card-oneline-label">Driver name:</span>
-                  <span class="card-oneline-value">${driverDisplay}</span>
-                  <span class="card-oneline-sep">·</span>
-                  <span class="card-oneline-label">ETA:</span>
-                  <span class="card-oneline-value">${etaDisplay}</span>
+            <div class="card-header-row">
+              <div class="card-avatars">
+                <div class="avatar-wrap" title="Account">
+                  ${userPic ? `<img class="avatar-img" src="${esc(userPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+                  <div class="avatar-fallback" style="${userPic ? "display:none" : ""}">${esc((account.account_name || "?").charAt(0).toUpperCase())}</div>
                 </div>
-                <div class="card-timeline">${timelineDisplay}</div>
-                <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
-                  ${cardStages.map((_, i) => {
-                    const completed = i < safeStageIdx;
-                    const current = i === safeStageIdx;
-                    return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
-                  }).join("")}
+                ${isActive && !noDriver ? `
+                <div class="avatar-wrap avatar-driver" title="Driver">
+                  ${driverPic ? `<img class="avatar-img" src="${esc(driverPic)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />` : ""}
+                  <div class="avatar-fallback" style="${driverPic ? "display:none" : ""}">🚗</div>
                 </div>
-              ` : `
-                <div class="card-timeline" style="color: #888;">Waiting for orders...</div>
-              `}
+                ` : ""}
+              </div>
+              <div class="card-header-content">
+                <div class="card-header">
+                  <button type="button" class="account-name" data-entry-id="${account.entry_id}" aria-label="View details for ${esc(account.account_name)}">${esc(account.account_name)}</button>
+                  <span class="status-badge ${hasError ? 'status-error' : (isActive ? 'status-active' : 'status-inactive')}">
+                    ${hasError ? 'Error' : (isActive ? 'Active Order' : 'No Order')}
+                  </span>
+                </div>
+                ${isActive ? `
+                  <div class="card-oneline">
+                    <span class="card-oneline-label">Restaurant:</span>
+                    <span class="card-oneline-value">${esc(account.restaurant_name || "—")}</span>
+                    <span class="card-oneline-sep">·</span>
+                    <span class="card-oneline-label">Driver:</span>
+                    <span class="card-oneline-value">${esc(driverDisplay)}</span>
+                    ${driverPhoneFormatted ? `<span class="card-oneline-sep">·</span><span class="card-phone">${esc(driverPhoneFormatted)}</span>` : ""}
+                    <span class="card-oneline-sep">·</span>
+                    <span class="card-oneline-label">ETA:</span>
+                    <span class="card-oneline-value">${esc(etaDisplay)}</span>
+                  </div>
+                  <div class="card-timeline">${esc(timelineDisplay)}</div>
+                  <div class="card-stage-progress" title="Preparing → Picked up → En route → Arriving">
+                    ${cardStages.map((_, i) => {
+                      const completed = i < safeStageIdx;
+                      const current = i === safeStageIdx;
+                      return `<div class="card-stage-bar ${completed ? "active" : ""} ${current ? "current" : ""}"></div>`;
+                    }).join("")}
+                  </div>
+                ` : `
+                  <div class="card-timeline" style="color: #888;">Waiting for orders...</div>
+                `}
+              </div>
             </div>
           </div>
           
@@ -1594,18 +1703,14 @@ class UberEatsPanel extends HTMLElement {
     if (!acc) return "";
 
     const isActive = acc.active;
-    const trackingActive = acc.tracking_active;
-    const driverAssigned = acc.driver_assigned;
     const noDriver =
       !acc.driver_name ||
       acc.driver_name === "No Driver Assigned" ||
       acc.driver_name === "Unknown";
-
-    const orderStatusDisplay = this._displayOrderStatus(acc);
-    const driverDisplay = noDriver ? "Not assigned" : acc.driver_name;
     const locationStreet = noDriver ? "None yet" : (acc.driver_location?.street || "—");
     const locationSuburb = noDriver ? "—" : (acc.driver_location?.suburb || "—");
-    const etaDisplay =
+    const lat = acc.driver_location?.lat ?? acc.home_location?.lat ?? 0;
+    const lon = acc.driver_location?.lon ?? acc.home_location?.lon ?? 0;
       acc.driver_eta && acc.driver_eta !== "No ETA" && acc.driver_eta !== "No ETA Available"
         ? acc.driver_eta
         : "—";
@@ -1614,17 +1719,11 @@ class UberEatsPanel extends HTMLElement {
         ? `${acc.minutes_remaining} min`
         : "—";
 
-    // Get map coordinates
-    const lat = acc.driver_location?.lat || acc.home_location?.lat || 0;
-    const lon = acc.driver_location?.lon || acc.home_location?.lon || 0;
-    const mapUrl = this._getMapUrl(lat, lon, 16);
-    
-    // Stage progress
-    const stages = ["preparing", "picked up", "en route", "arriving"];
-    const currentStage = (acc.order_stage || "").toLowerCase();
-    const currentStageIndex = stages.findIndex(s => currentStage.includes(s));
-
-    // Connection status
+    const mapUrl = this._getMultiMarkerMapUrl(acc) || this._getMapUrl(
+      acc.driver_location?.lat || acc.home_location?.lat || 0,
+      acc.driver_location?.lon || acc.home_location?.lon || 0,
+      16
+    );
     const isConnected = acc.connection_status !== "error";
 
     return `
@@ -1634,7 +1733,7 @@ class UberEatsPanel extends HTMLElement {
             <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
           </button>
           <button class="btn-icon" id="back-btn">←</button>
-          <h2>${acc.account_name}</h2>
+          <h2>${this._escapeHtml(acc.account_name)}</h2>
           <div class="connection-indicator">
             <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
             <span style="font-size:13px;color:${isConnected ? '#06C167' : '#dc3545'}">
@@ -1644,7 +1743,6 @@ class UberEatsPanel extends HTMLElement {
         </div>
         
         <div class="details-content">
-          <!-- Map Always Visible -->
           <div class="big-map">
             ${mapUrl ? `
               <iframe src="${mapUrl}" title="Location Map"></iframe>
@@ -1655,77 +1753,8 @@ class UberEatsPanel extends HTMLElement {
             `}
           </div>
           
-          ${isActive && driverAssigned ? `
-            <div class="driver-card">
-              <div class="driver-avatar">🚗</div>
-              <div class="driver-details">
-                <h4>${acc.driver_name}</h4>
-                <p>${acc.driver_location?.street || "On the way"}</p>
-              </div>
-              <div class="driver-eta">
-                <div class="time">${acc.minutes_remaining || "—"} min</div>
-                <div class="label">Estimated</div>
-              </div>
-            </div>
-          ` : ""}
-          
           <div class="details-grid">
-            <!-- Order Information -->
-            <div class="details-section">
-              <div class="section-title">Order Information</div>
-              <div class="info-grid">
-                <div class="info-row">
-                  <span class="info-label">Status</span>
-                  <span class="info-value ${isActive ? 'success' : ''}">${isActive ? "Active Order" : "No Active Order"}</span>
-                </div>
-                ${isActive ? `
-                  <div class="info-row">
-                    <span class="info-label">Restaurant</span>
-                    <span class="info-value">${acc.restaurant_name}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Order Stage</span>
-                    <span class="info-value">${acc.order_stage}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Order Status</span>
-                    <span class="info-value">${orderStatusDisplay}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Driver</span>
-                    <span class="info-value">${driverDisplay}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">ETA</span>
-                    <span class="info-value success">${etaDisplay}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">ETT</span>
-                    <span class="info-value">${ettDisplay}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Latest Arrival</span>
-                    <span class="info-value">${acc.latest_arrival}</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">Order ID</span>
-                    <span class="info-value" style="font-family:monospace;font-size:12px;">${acc.order_id?.substring(0, 16) || "N/A"}...</span>
-                  </div>
-                ` : ""}
-              </div>
-              
-              ${isActive ? `
-                <div class="stage-progress">
-                  ${stages.map((stage, i) => {
-                    const isCompleted = i < currentStageIndex;
-                    const isCurrent = i === currentStageIndex;
-                    return `<div class="stage-bar ${isCompleted ? 'active' : ''} ${isCurrent ? 'current' : ''}"></div>`;
-                  }).join("")}
-                </div>
-              ` : ""}
-            </div>
-            
-            <!-- Account & Connection Info -->
+            <!-- Account Details only (no Order Information) -->
             <div class="details-section">
               <div class="section-title">Account Details</div>
               <div class="info-grid">
@@ -1761,7 +1790,7 @@ class UberEatsPanel extends HTMLElement {
                     </div>
                     <div class="info-row">
                       <span class="info-label">Coordinates</span>
-                      <span class="info-value" style="font-family:monospace;font-size:12px;">${noDriver ? "—" : `${lat.toFixed(5)}, ${lon.toFixed(5)}`}</span>
+                      <span class="info-value" style="font-family:monospace;font-size:12px;">${noDriver ? "—" : (typeof lat === "number" && typeof lon === "number" ? `${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}` : "—")}</span>
                     </div>
                   </div>
                 </div>
@@ -2123,7 +2152,7 @@ class UberEatsPanel extends HTMLElement {
     if (intervalMinutesSelect) {
       intervalMinutesSelect.addEventListener("change", () => {
         const entryId = intervalMinutesSelect.dataset.entryId;
-        const minutes = parseInt(intervalMinutesSelect.value, 10) || 10;
+        const minutes = Math.max(5, Math.min(15, parseInt(intervalMinutesSelect.value, 10) || 10));
         const settings = { ...this._ttsSettings, tts_interval_minutes: minutes };
         this._saveTtsSettings(entryId, settings).then(() => this._render());
       });

@@ -116,6 +116,12 @@ async def websocket_get_accounts(
                     "suburb": "Unknown",
                     "address": "Home",
                 },
+                "user_picture_url": None,
+                "driver_picture_url": None,
+                "driver_phone_formatted": "",
+                "home_location": {"lat": home_lat, "lon": home_lon},
+                "store_location": None,
+                "driver_location_coords": None,
             })
             continue
         
@@ -169,6 +175,12 @@ async def websocket_get_accounts(
                 "suburb": data.get("driver_location_suburb", "Unknown"),
                 "address": data.get("driver_location_address", "Unknown"),
             },
+            "user_picture_url": data.get("user_picture_url"),
+            "driver_picture_url": data.get("driver_picture_url"),
+            "driver_phone_formatted": data.get("driver_phone_formatted", ""),
+            "home_location": data.get("home_location"),
+            "store_location": data.get("store_location"),
+            "driver_location_coords": data.get("driver_location_coords"),
         })
     
     try:
@@ -244,15 +256,17 @@ async def websocket_get_account_data(
                 "county": "Unknown",
                 "address": "Home",
             },
-            "home_location": {
-                "lat": home_lat,
-                "lon": home_lon,
-            },
+            "home_location": {"lat": home_lat, "lon": home_lon},
+            "store_location": None,
+            "driver_location_coords": None,
+            "user_picture_url": None,
+            "driver_picture_url": None,
+            "driver_phone_formatted": "",
             "map_url": "No Map Available",
         }
         connection.send_result(msg["id"], result)
         return
-    
+
     data = coordinator.data or {}
     
     # Check last update success
@@ -293,22 +307,24 @@ async def websocket_get_account_data(
         "minutes_remaining": data.get("minutes_remaining"),
         "order_id": data.get("order_id", "No Active Order"),
         "latest_arrival": data.get("latest_arrival", "No Latest Arrival"),
-        "driver_location": {
-            "lat": float(lat) if tracking_active else home_lat,
-            "lon": float(lon) if tracking_active else home_lon,
-            "street": data.get("driver_location_street", "Unknown"),
-            "suburb": data.get("driver_location_suburb", "Unknown"),
-            "quarter": data.get("driver_location_quarter", "Unknown"),
-            "county": data.get("driver_location_county", "Unknown"),
-            "address": data.get("driver_location_address", "Unknown"),
-        },
-        "home_location": {
-            "lat": home_lat,
-            "lon": home_lon,
-        },
+            "driver_location": {
+                "lat": float(lat) if tracking_active else home_lat,
+                "lon": float(lon) if tracking_active else home_lon,
+                "street": data.get("driver_location_street", "Unknown"),
+                "suburb": data.get("driver_location_suburb", "Unknown"),
+                "quarter": data.get("driver_location_quarter", "Unknown"),
+                "county": data.get("driver_location_county", "Unknown"),
+                "address": data.get("driver_location_address", "Unknown"),
+            },
+        "home_location": data.get("home_location") or {"lat": home_lat, "lon": home_lon},
+        "store_location": data.get("store_location"),
+        "driver_location_coords": data.get("driver_location_coords"),
+        "user_picture_url": data.get("user_picture_url"),
+        "driver_picture_url": data.get("driver_picture_url"),
+        "driver_phone_formatted": data.get("driver_phone_formatted", ""),
         "map_url": data.get("map_url", "No Map Available"),
     }
-    
+
     connection.send_result(msg["id"], result)
 
 

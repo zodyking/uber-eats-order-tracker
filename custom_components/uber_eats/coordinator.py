@@ -97,15 +97,22 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                         contacts = order.get("contacts", [])
                         active_overview = order.get("activeOrderOverview", {})
                         background_feed_cards = order.get("backgroundFeedCards", [])
+                        order_info = order.get("orderInfo", {})
 
-                        lat = (
-                            background_feed_cards[0].get("mapEntity", [])[0].get("latitude")
-                            if background_feed_cards else None
-                        )
-                        lon = (
-                            background_feed_cards[0].get("mapEntity", [])[0].get("longitude")
-                            if background_feed_cards else None
-                        )
+                        # Extract map entities (EATER=home, STORE=restaurant, COURIER=driver)
+                        map_entities = self._get_map_entities(background_feed_cards)
+                        store_loc = order_info.get("storeInfo", {}).get("location", {})
+                        store_lat = store_loc.get("latitude")
+                        store_lon = store_loc.get("longitude")
+                        if store_lat is not None and store_lon is not None and "STORE" not in map_entities:
+                            map_entities["STORE"] = {"lat": float(store_lat), "lon": float(store_lon)}
+
+                        eater = map_entities.get("EATER", {})
+                        store = map_entities.get("STORE", {})
+                        courier = map_entities.get("COURIER", {})
+
+                        lat = courier.get("lat") or store.get("lat") or eater.get("lat")
+                        lon = courier.get("lon") or store.get("lon") or eater.get("lon")
 
                         # Reverse geocode remaining components (or use defaults)
                         if lat and lon:
@@ -125,6 +132,21 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             title_summary = status_obj.get("titleSummary", {}).get("summary", {})
                             timeline_summary = title_summary.get("text", "") or ""
                         order_status_text = (timeline_summary or "Unknown").strip() or "Unknown"
+
+                        # Driver picture and phone
+                        driver_picture_url = None
+                        for fc in feed_cards:
+                            if fc.get("type") == "courier" and fc.get("courier"):
+                                driver_picture_url = fc["courier"][0].get("iconUrl") or None
+                                break
+                        courier_contact = next((c for c in contacts if c.get("type") == "COURIER"), contacts[0] if contacts else {})
+                        driver_phone_formatted = courier_contact.get("formattedPhoneNumber") or courier_contact.get("phoneNumber") or ""
+
+                        # User (customer) picture
+                        user_picture_url = None
+                        customer_infos = order_info.get("customerInfos") or []
+                        if customer_infos:
+                            user_picture_url = customer_infos[0].get("pictureUrl") or None
 
                         current_data.update({
                             "active": True,
@@ -152,6 +174,14 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             "order_id": order.get("uuid", "Unknown"),
                             "order_status_description": order_status_text,
                             "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
+
+                            # Extended: pics, phone, map locations for multi-marker map
+                            "user_picture_url": user_picture_url,
+                            "driver_picture_url": driver_picture_url,
+                            "driver_phone_formatted": driver_phone_formatted,
+                            "home_location": eater if eater else {"lat": self.hass.config.latitude or 0, "lon": self.hass.config.longitude or 0},
+                            "store_location": store if store else None,
+                            "driver_location_coords": courier if courier else None,
                         })
 
                         # optional history (kept as you had)
@@ -178,7 +208,22 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Error fetching data: %s", err, exc_info=True)
                 return self._default_data()
 
+    def _get_map_entities(self, background_feed_cards):
+        """Extract EATER (home), STORE (restaurant), COURIER (driver) from mapEntity."""
+        out = {}
+        if not background_feed_cards:
+            return out
+        for m in (background_feed_cards[0].get("mapEntity") or []):
+            t = m.get("type")
+            lat = m.get("latitude")
+            lon = m.get("longitude")
+            if t and lat is not None and lon is not None:
+                out[t] = {"lat": float(lat), "lon": float(lon)}
+        return out
+
     def _default_data(self):
+        home_lat = self.hass.config.latitude or 0.0
+        home_lon = self.hass.config.longitude or 0.0
         return {
             "active": False,
             "order_stage": "No Active Order",
@@ -187,8 +232,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "driver_eta_str": "No ETA Available",
             "driver_eta": None,
 
-            "driver_location_lat": self.hass.config.latitude or 0.0,
-            "driver_location_lon": self.hass.config.longitude or 0.0,
+            "driver_location_lat": home_lat,
+            "driver_location_lon": home_lon,
 
             # Location pieces (trimmed)
             "driver_location_street": "No Driver Assigned",
@@ -203,6 +248,13 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "order_id": "No Active Order",
             "order_status_description": "No Active Order",
             "latest_arrival": "No Latest Arrival",
+
+            "user_picture_url": None,
+            "driver_picture_url": None,
+            "driver_phone_formatted": "",
+            "home_location": {"lat": home_lat, "lon": home_lon},
+            "store_location": None,
+            "driver_location_coords": None,
         }
 
     def _get_locale_code(self, time_zone):
