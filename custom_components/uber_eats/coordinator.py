@@ -54,7 +54,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self._order_history = []  # Per-account history
         self._previous_data = None  # Set on first update
         self._last_interval_tts_time = None  # For interval TTS when driver assigned
-        self._last_driver_nearby_triggered = False  # For 200 ft automation trigger
+        self._driver_nearby_triggered_orders = set()  # Track which order UUIDs have triggered nearby action
         self._cached_user_profile = None  # Cached user profile from getUserV1
         super().__init__(
             hass,
@@ -680,7 +680,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 self._last_interval_tts_time = dt_util.utcnow()
         if had_driver and not has_driver:
             self._last_interval_tts_time = None
-            self._last_driver_nearby_triggered = False
+            self._driver_nearby_triggered_orders.clear()
 
         # 3. Card timeline / order status change (order_status from API)
         prev_order_status = prev.get("order_status", "")
@@ -716,35 +716,67 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 )
             )
 
-        # 5. Driver nearby action: trigger user-selected automation when within distance (once per approach)
+        # 5. Driver nearby action: trigger user-selected automation when any driver is within distance
+        #    Supports multiple orders - triggers once per order when each driver approaches
         driver_nearby_enabled = options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENABLED, False)
         automation_entity = (options.get(CONF_DRIVER_NEARBY_AUTOMATION_ENTITY) or "").strip()
         distance_feet = max(50, min(2000, int(options.get(CONF_DRIVER_NEARBY_DISTANCE_FEET, DEFAULT_DRIVER_NEARBY_DISTANCE_FEET))))
         reset_feet = distance_feet + 50  # allow re-trigger after driver leaves and comes back
-        if driver_nearby_enabled and automation_entity and automation_entity.startswith("automation.") and has_driver:
+        
+        if driver_nearby_enabled and automation_entity and automation_entity.startswith("automation."):
             home_lat = self.hass.config.latitude or 0.0
             home_lon = self.hass.config.longitude or 0.0
-            lat = current_data.get("driver_location_lat")
-            lon = current_data.get("driver_location_lon")
-            if lat is not None and lon is not None and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                dist_ft = self._distance_feet(float(lat), float(lon), home_lat, home_lon)
-                if dist_ft is not None:
-                    if dist_ft > reset_feet:
-                        self._last_driver_nearby_triggered = False
-                    elif dist_ft <= distance_feet and not self._last_driver_nearby_triggered:
-                        self._last_driver_nearby_triggered = True
-                        self.hass.async_create_task(
-                            self.hass.services.async_call(
-                                "automation",
-                                "trigger",
-                                {"skip_condition": False},
-                                target={"entity_id": automation_entity},
-                                blocking=False,
+            all_orders = current_data.get("orders", [])
+            current_order_ids = set()
+            
+            for order in all_orders:
+                order_uuid = order.get("order_uuid") or order.get("order_id", "")
+                if not order_uuid:
+                    continue
+                current_order_ids.add(order_uuid)
+                
+                # Skip if order has no driver
+                driver_name = order.get("driver_name", "")
+                if _no_driver(driver_name):
+                    continue
+                
+                # Get driver coordinates from order
+                coords = order.get("driver_location_coords", {})
+                lat = coords.get("lat") if coords else None
+                lon = coords.get("lon") if coords else None
+                
+                # Fall back to flat fields if coords not in order
+                if lat is None:
+                    lat = order.get("driver_location_lat")
+                if lon is None:
+                    lon = order.get("driver_location_lon")
+                
+                if lat is not None and lon is not None and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                    dist_ft = self._distance_feet(float(lat), float(lon), home_lat, home_lon)
+                    if dist_ft is not None:
+                        if dist_ft > reset_feet:
+                            # Driver left the area, allow re-trigger
+                            self._driver_nearby_triggered_orders.discard(order_uuid)
+                        elif dist_ft <= distance_feet and order_uuid not in self._driver_nearby_triggered_orders:
+                            # Driver is nearby and hasn't triggered yet for this order
+                            self._driver_nearby_triggered_orders.add(order_uuid)
+                            _LOGGER.info("Driver nearby trigger for order %s (%.0f ft)", order_uuid[:8], dist_ft)
+                            self.hass.async_create_task(
+                                self.hass.services.async_call(
+                                    "automation",
+                                    "trigger",
+                                    {"skip_condition": False},
+                                    target={"entity_id": automation_entity},
+                                    blocking=False,
+                                )
                             )
-                        )
+            
+            # Clean up triggered orders that are no longer active
+            self._driver_nearby_triggered_orders = self._driver_nearby_triggered_orders & current_order_ids
         else:
+            # Reset if feature disabled or no orders
             if not has_driver:
-                self._last_driver_nearby_triggered = False
+                self._driver_nearby_triggered_orders.clear()
 
 
 __all__ = ["UberEatsCoordinator"]

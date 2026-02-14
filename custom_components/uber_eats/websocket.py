@@ -522,6 +522,7 @@ async def websocket_update_tts_settings(
         for k, v in (msg["tts_media_player_settings"] or {}).items():
             if isinstance(k, str) and k.startswith("media_player.") and isinstance(v, dict):
                 player_settings[k] = {
+                    "tts_entity_id": (v.get("tts_entity_id") or "").strip(),
                     "cache": bool(v.get("cache", True)),
                     "language": (v.get("language") or "").strip() if v.get("language") else "",
                     "options": v.get("options", {}) if isinstance(v.get("options"), dict) else {},

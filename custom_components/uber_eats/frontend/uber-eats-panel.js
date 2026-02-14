@@ -44,9 +44,34 @@ class UberEatsPanel extends HTMLElement {
     this._playerLangEnabled = {};  // Per-player language toggle
     this._playerOptsEnabled = {};  // Per-player options toggle
     this._expandedPlayers = {};  // Track which media player cards are expanded
-    // Cache for statistics and past orders (keyed by entry_id)
-    this._statsCache = {};
+    // Cache for statistics and past orders - uses localStorage for persistence
+    this._statsCache = this._loadStatsFromLocalStorage();
     this._userProfile = null;  // User profile from getUserV1 API
+  }
+
+  // LocalStorage helpers for persistent caching
+  _getLocalStorageKey() {
+    return "uber_eats_stats_cache";
+  }
+
+  _loadStatsFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem(this._getLocalStorageKey());
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn("Failed to load stats from localStorage:", e);
+    }
+    return {};
+  }
+
+  _saveStatsToLocalStorage() {
+    try {
+      localStorage.setItem(this._getLocalStorageKey(), JSON.stringify(this._statsCache));
+    } catch (e) {
+      console.warn("Failed to save stats to localStorage:", e);
+    }
   }
 
   set hass(hass) {
@@ -533,7 +558,7 @@ class UberEatsPanel extends HTMLElement {
         
         /* Main Content */
         .content {
-          padding: 24px;
+          padding: 16px;
           max-width: 1000px;
           width: 100%;
           margin: 0 auto;
@@ -585,30 +610,19 @@ class UberEatsPanel extends HTMLElement {
           box-shadow: 0 4px 24px rgba(6, 193, 103, 0.1);
         }
         
-        /* Card main: 3-column layout (account pic | info | map) */
+        /* Card main: 3-column layout (account pic | info | map) - fluid, same on all screens */
         .card-main {
           display: flex;
-          min-height: 180px;
+          min-height: 140px;
+          overflow: hidden;
         }
         
-        @media (max-width: 768px) {
-          .card-main {
-            flex-direction: column;
-          }
-          .card-account-pic {
-            width: 100%;
-            height: 120px;
-          }
-          .card-map {
-            height: 160px;
-            width: 100%;
-          }
-        }
-        
-        /* Account Picture - Left side rounded square */
+        /* Account Picture - Left side rounded square - fluid width */
         .card-account-pic {
-          width: 140px;
-          min-height: 180px;
+          width: 25%;
+          min-width: 80px;
+          max-width: 140px;
+          min-height: 140px;
           position: relative;
           flex-shrink: 0;
           overflow: hidden;
@@ -627,7 +641,7 @@ class UberEatsPanel extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 48px;
+          font-size: clamp(28px, 8vw, 48px);
           font-weight: 700;
           color: #444;
           background: linear-gradient(135deg, #2a2a2a 0%, #222 100%);
@@ -656,32 +670,33 @@ class UberEatsPanel extends HTMLElement {
         /* Card Info Section - Middle */
         .card-info {
           flex: 1;
-          padding: 20px 24px;
+          padding: 12px 16px;
           display: flex;
           flex-direction: column;
           justify-content: center;
           min-width: 0;
+          overflow: hidden;
         }
         
         .card-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
-          margin-bottom: 12px;
+          gap: 8px;
+          margin-bottom: 8px;
         }
         
         /* Driver block - square avatar with name below */
         .driver-block {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 8px;
         }
         
         .driver-avatar {
-          width: 48px;
-          height: 48px;
-          border-radius: 10px;
+          width: clamp(36px, 10vw, 48px);
+          height: clamp(36px, 10vw, 48px);
+          border-radius: 8px;
           overflow: hidden;
           background: #2a2a2a;
           display: flex;
@@ -698,7 +713,7 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .driver-avatar .driver-fallback {
-          font-size: 22px;
+          font-size: clamp(16px, 5vw, 22px);
         }
         
         .driver-info {
@@ -709,7 +724,7 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .driver-name {
-          font-size: 14px;
+          font-size: clamp(11px, 3vw, 14px);
           font-weight: 600;
           color: #06C167;
           white-space: nowrap;
@@ -718,19 +733,19 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .driver-label {
-          font-size: 11px;
+          font-size: clamp(9px, 2.5vw, 11px);
           color: #666;
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
         
         .status-badge {
-          padding: 6px 14px;
+          padding: 4px 10px;
           border-radius: 100px;
-          font-size: 11px;
+          font-size: clamp(9px, 2.5vw, 11px);
           font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.8px;
+          letter-spacing: 0.5px;
           white-space: nowrap;
           flex-shrink: 0;
         }
@@ -755,10 +770,10 @@ class UberEatsPanel extends HTMLElement {
           display: flex;
           flex-wrap: wrap;
           align-items: center;
-          gap: 6px 12px;
-          font-size: 14px;
-          line-height: 1.6;
-          margin-bottom: 12px;
+          gap: 4px 8px;
+          font-size: clamp(11px, 3vw, 14px);
+          line-height: 1.5;
+          margin-bottom: 8px;
         }
         
         .card-oneline-label {
@@ -767,6 +782,10 @@ class UberEatsPanel extends HTMLElement {
         .card-oneline-value {
           color: #fff;
           font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 120px;
         }
         .card-oneline-sep {
           color: #444;
@@ -774,10 +793,13 @@ class UberEatsPanel extends HTMLElement {
         
         /* Timeline message */
         .card-timeline {
-          font-size: 15px;
+          font-size: clamp(12px, 3.5vw, 15px);
           color: #999;
-          line-height: 1.5;
+          line-height: 1.4;
           margin-bottom: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         
         .card-timeline.waiting {
@@ -794,7 +816,7 @@ class UberEatsPanel extends HTMLElement {
         }
         
         .card-waiting-message {
-          font-size: 22px;
+          font-size: clamp(14px, 4vw, 22px);
           font-weight: 500;
           color: #555;
           font-style: italic;
@@ -810,13 +832,13 @@ class UberEatsPanel extends HTMLElement {
         /* Progress bar */
         .card-stage-progress {
           display: flex;
-          gap: 6px;
-          margin-top: 20px;
+          gap: 4px;
+          margin-top: 12px;
         }
         
         .card-stage-bar {
           flex: 1;
-          height: 6px;
+          height: 5px;
           background: #2a2a2a;
           border-radius: 3px;
           transition: background 0.3s ease;
@@ -836,10 +858,12 @@ class UberEatsPanel extends HTMLElement {
           50% { opacity: 0.65; }
         }
         
-        /* Card Map Section */
+        /* Card Map Section - fluid width */
         .card-map {
-          width: 280px;
-          min-height: 200px;
+          width: 35%;
+          min-width: 120px;
+          max-width: 280px;
+          min-height: 140px;
           background: #111;
           position: relative;
           flex-shrink: 0;
@@ -2532,7 +2556,7 @@ class UberEatsPanel extends HTMLElement {
             <div class="media-player-setting">
               <label>TTS Engine</label>
               <select class="player-tts-engine-select" data-entity-id="${entityId}" data-entry-id="${acc.entry_id}" ${enabled ? "" : "disabled"}>
-                <option value="">Use global TTS engine</option>
+                <option value="">Select TTS engine...</option>
                 ${ttsList.map((e) =>
                   `<option value="${e.entity_id}" ${e.entity_id === playerTtsEntity ? "selected" : ""}>${e.name || e.entity_id}</option>`
                 ).join("")}
@@ -2829,44 +2853,60 @@ class UberEatsPanel extends HTMLElement {
   async _fetchPastOrders(entryId) {
     if (!this._hass || !entryId) return;
     
-    // Load from cache immediately if available
+    // Load from localStorage cache immediately if available
     const cached = this._statsCache[entryId];
-    if (cached) {
+    if (cached && cached.orders && cached.orders.length > 0) {
       this._pastOrders = cached.orders || [];
       this._accountStats = cached.statistics || null;
-      this._pastOrdersLoading = true; // Still show loading indicator for background fetch
+      this._pastOrdersLoading = false; // No loading indicator - show cached data immediately
       this._render();
+      // Still fetch fresh data in background (without showing loading)
+      this._fetchPastOrdersBackground(entryId);
     } else {
+      // First time load - show loading indicator
       this._pastOrdersLoading = true;
       this._pastOrders = [];
       this._accountStats = null;
       this._render();
+      // Fetch and wait
+      await this._fetchPastOrdersBackground(entryId);
+      this._pastOrdersLoading = false;
+      this._render();
     }
+  }
 
-    // Fetch fresh data in background
+  async _fetchPastOrdersBackground(entryId) {
+    // Fetch fresh data in background and update cache + localStorage
     try {
       const result = await this._hass.callWS({
         type: "uber_eats/get_past_orders",
         entry_id: entryId,
       });
-      this._pastOrders = result.orders || [];
-      this._accountStats = result.statistics || null;
-      // Update cache
+      const newOrders = result.orders || [];
+      const newStats = result.statistics || null;
+      
+      // Check if data actually changed before re-rendering
+      const cached = this._statsCache[entryId];
+      const ordersChanged = JSON.stringify(newOrders) !== JSON.stringify(cached?.orders || []);
+      const statsChanged = JSON.stringify(newStats) !== JSON.stringify(cached?.statistics || null);
+      
+      // Update memory cache
       this._statsCache[entryId] = {
-        orders: this._pastOrders,
-        statistics: this._accountStats,
+        orders: newOrders,
+        statistics: newStats,
         timestamp: Date.now(),
       };
+      // Persist to localStorage
+      this._saveStatsToLocalStorage();
+      
+      // Only update UI if data changed and we're still viewing this account
+      if ((ordersChanged || statsChanged) && this._selectedAccount?.entry_id === entryId) {
+        this._pastOrders = newOrders;
+        this._accountStats = newStats;
+        this._render();
+      }
     } catch (err) {
       console.error("Failed to fetch past orders:", err);
-      // Keep cached data if fetch fails
-      if (!cached) {
-        this._pastOrders = [];
-        this._accountStats = null;
-      }
-    } finally {
-      this._pastOrdersLoading = false;
-      this._render();
     }
   }
 
@@ -3114,8 +3154,11 @@ class UberEatsPanel extends HTMLElement {
         const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
         const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
         const hasLang = !!playerSettings.language;
-        if (hasLang) {
-          // Disable - clear language
+        const isUiEnabled = !!(this._playerLangEnabled || {})[entityId];
+        // Currently enabled = has saved lang OR UI toggled on
+        const currentlyEnabled = hasLang || isUiEnabled;
+        if (currentlyEnabled) {
+          // Disable - clear language and UI state
           playerSettings.language = "";
           perPlayerSettings[entityId] = playerSettings;
           this._playerLangEnabled = { ...this._playerLangEnabled, [entityId]: false };
@@ -3156,8 +3199,11 @@ class UberEatsPanel extends HTMLElement {
         const perPlayerSettings = { ...(this._ttsSettings?.tts_media_player_settings || {}) };
         const playerSettings = { ...(perPlayerSettings[entityId] || {}) };
         const hasOpts = playerSettings.options && Object.keys(playerSettings.options).length > 0;
-        if (hasOpts) {
-          // Disable - clear options
+        const isUiEnabled = !!(this._playerOptsEnabled || {})[entityId];
+        // Currently enabled = has saved options OR UI toggled on
+        const currentlyEnabled = hasOpts || isUiEnabled;
+        if (currentlyEnabled) {
+          // Disable - clear options and UI state
           playerSettings.options = {};
           perPlayerSettings[entityId] = playerSettings;
           this._playerOptsEnabled = { ...this._playerOptsEnabled, [entityId]: false };
