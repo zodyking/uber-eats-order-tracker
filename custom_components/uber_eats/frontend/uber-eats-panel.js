@@ -22,6 +22,47 @@ const UBER_EATS_LOGO_SIMPLE = `
 </span>
 `;
 
+// Currency symbols by country code (ISO 3166-1 alpha-2)
+const CURRENCY_SYMBOLS = {
+  US: "$", CA: "$", AU: "$", NZ: "$", SG: "$", HK: "$", MX: "$", CL: "$", CO: "$", AR: "$",
+  GB: "£", UK: "£",
+  EU: "€", DE: "€", FR: "€", IT: "€", ES: "€", NL: "€", BE: "€", AT: "€", IE: "€", PT: "€", FI: "€", GR: "€",
+  JP: "¥", CN: "¥",
+  KR: "₩",
+  IN: "₹",
+  BR: "R$",
+  ZA: "R",
+  AE: "د.إ", SA: "﷼",
+  TH: "฿",
+  PL: "zł",
+  SE: "kr", NO: "kr", DK: "kr",
+  CH: "CHF",
+  RU: "₽",
+  TR: "₺",
+  IL: "₪",
+  MY: "RM",
+  PH: "₱",
+  ID: "Rp",
+  VN: "₫",
+  TW: "NT$",
+  CZ: "Kč",
+  HU: "Ft",
+  RO: "lei",
+  UA: "₴",
+  NG: "₦",
+  EG: "E£",
+  KE: "KSh",
+  PK: "₨",
+  BD: "৳",
+  LK: "Rs",
+};
+
+function getCurrencySymbol(countryCode) {
+  if (!countryCode) return "$";
+  const code = countryCode.toUpperCase();
+  return CURRENCY_SYMBOLS[code] || "$";
+}
+
 class UberEatsPanel extends HTMLElement {
   constructor() {
     super();
@@ -2658,6 +2699,22 @@ class UberEatsPanel extends HTMLElement {
     return div.innerHTML;
   }
 
+  /** Get currency symbol based on user's country from profile */
+  _getCurrencySymbol() {
+    const countryCode = this._userProfile?.country_code || "US";
+    return getCurrencySymbol(countryCode);
+  }
+
+  /** Format a currency value with the correct symbol */
+  _formatCurrency(value, fallback = "—") {
+    if (typeof value !== "number") return fallback;
+    const symbol = this._getCurrencySymbol();
+    if (value < 0) {
+      return `-${symbol}${Math.abs(value).toFixed(2)}`;
+    }
+    return `${symbol}${value.toFixed(2)}`;
+  }
+
   /** Parse simple YAML-like key: value lines into a dict. */
   _parseYamlOptions(text) {
     const result = {};
@@ -2706,15 +2763,16 @@ class UberEatsPanel extends HTMLElement {
 
     const year = stats.year || new Date().getFullYear();
     const totalOrders = stats.total_orders || 0;
-    const totalSpent = typeof stats.total_spent === "number" ? `$${stats.total_spent.toFixed(2)}` : "$0.00";
-    const totalDeliveryFees = typeof stats.total_delivery_fees === "number" ? `$${stats.total_delivery_fees.toFixed(2)}` : "$0.00";
+    const currencySymbol = this._getCurrencySymbol();
+    const totalSpent = typeof stats.total_spent === "number" ? `${currencySymbol}${stats.total_spent.toFixed(2)}` : `${currencySymbol}0.00`;
+    const totalDeliveryFees = typeof stats.total_delivery_fees === "number" ? `${currencySymbol}${stats.total_delivery_fees.toFixed(2)}` : `${currencySymbol}0.00`;
     const topRestaurants = stats.top_restaurants || [];
 
     const topRestaurantsHtml = topRestaurants.length > 0 
       ? topRestaurants.map((r, idx) => {
           const name = this._escapeHtml(r.name || "Unknown");
           const orderCount = r.order_count || 0;
-          const spent = typeof r.total_spent === "number" ? `$${r.total_spent.toFixed(2)}` : "$0.00";
+          const spent = typeof r.total_spent === "number" ? `${currencySymbol}${r.total_spent.toFixed(2)}` : `${currencySymbol}0.00`;
           const medals = ["🥇", "🥈", "🥉"];
           return `
             <div class="top-restaurant-row">
@@ -2788,11 +2846,22 @@ class UberEatsPanel extends HTMLElement {
       const imgUrl = order.hero_image_url || "";
       const name = this._escapeHtml(order.restaurant_name || "Unknown");
       const date = this._escapeHtml(order.date || "");
-      const subtotal = typeof order.subtotal === "number" ? `$${order.subtotal.toFixed(2)}` : "—";
-      const deliveryFee = typeof order.delivery_fee === "number" ? `$${order.delivery_fee.toFixed(2)}` : "—";
-      const tax = typeof order.tax === "number" ? `$${order.tax.toFixed(2)}` : null;
-      const promotions = typeof order.promotions === "number" && order.promotions < 0 ? `-$${Math.abs(order.promotions).toFixed(2)}` : null;
-      const total = typeof order.total === "number" ? `$${order.total.toFixed(2)}` : "—";
+      const currencySymbol = this._getCurrencySymbol();
+      const subtotal = typeof order.subtotal === "number" ? `${currencySymbol}${order.subtotal.toFixed(2)}` : "—";
+      const deliveryFee = typeof order.delivery_fee === "number" ? `${currencySymbol}${order.delivery_fee.toFixed(2)}` : "—";
+      const tax = typeof order.tax === "number" ? `${currencySymbol}${order.tax.toFixed(2)}` : null;
+      const promotions = typeof order.promotions === "number" && order.promotions < 0 ? `-${currencySymbol}${Math.abs(order.promotions).toFixed(2)}` : null;
+      const total = typeof order.total === "number" ? `${currencySymbol}${order.total.toFixed(2)}` : "—";
+      
+      // Calculate "Other Fees" if breakdown doesn't match total
+      const subtotalNum = typeof order.subtotal === "number" ? order.subtotal : 0;
+      const deliveryFeeNum = typeof order.delivery_fee === "number" ? order.delivery_fee : 0;
+      const taxNum = typeof order.tax === "number" ? order.tax : 0;
+      const promotionsNum = typeof order.promotions === "number" ? order.promotions : 0;
+      const totalNum = typeof order.total === "number" ? order.total : 0;
+      const expectedTotal = subtotalNum + deliveryFeeNum + taxNum + promotionsNum;
+      const otherFeesNum = totalNum - expectedTotal;
+      const otherFees = Math.abs(otherFeesNum) > 0.01 ? `${currencySymbol}${otherFeesNum.toFixed(2)}` : null;
       // Clean address: remove empty fields (double commas, leading/trailing commas)
       const rawAddress = order.store_address || "—";
       const cleanAddress = rawAddress
@@ -2830,6 +2899,12 @@ class UberEatsPanel extends HTMLElement {
             <div class="past-order-row">
               <span class="past-order-label">Promotions</span>
               <span class="past-order-value">${promotions}</span>
+            </div>
+            ` : ""}
+            ${otherFees ? `
+            <div class="past-order-row">
+              <span class="past-order-label">Other Fees</span>
+              <span class="past-order-value">${otherFees}</span>
             </div>
             ` : ""}
             <div class="past-order-row total">

@@ -561,17 +561,18 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                 async with session.post(url, headers=headers, json={}) as resp:
                     if resp.status != 200:
                         _LOGGER.error("getUserV1 API returned %s", resp.status)
-                        return {"picture_url": None, "first_name": "", "last_name": ""}
+                        return {"picture_url": None, "first_name": "", "last_name": "", "country_code": "US"}
                     data = await resp.json()
                     user_data = data.get("data", {})
                     return {
                         "picture_url": user_data.get("pictureUrl"),
                         "first_name": user_data.get("firstName", ""),
                         "last_name": user_data.get("lastName", ""),
+                        "country_code": user_data.get("geoIpCountryCode", "US"),
                     }
             except Exception as e:
                 _LOGGER.error("Error fetching user profile: %s", e, exc_info=True)
-                return {"picture_url": None, "first_name": "", "last_name": ""}
+                return {"picture_url": None, "first_name": "", "last_name": "", "country_code": "US"}
 
     def _compute_order_statistics(self, orders, year):
         """Compute statistics from orders list."""
@@ -742,13 +743,16 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         curr_with_status = dict(current_data)
         curr_active = current_data.get("active")
         messages_to_send = []
+        
+        # Use first name only for TTS messages (sensor names still use full account_name)
+        tts_name = (self._cached_user_profile or {}).get("first_name", "").strip() or self.account_name
 
         # 1. New order: same logic as active order sensor — was off, now on (with restaurant for message)
         if not prev.get("active") and current_data.get("active"):
             rest = (current_data.get("restaurant_name") or "").strip()
             if rest and rest not in ("No Restaurant", "Unknown"):
                 msg = tts_notifications.build_message(
-                    prefix, self.account_name, curr_with_status, "new_order"
+                    prefix, tts_name, curr_with_status, "new_order"
                 )
                 if msg:
                     messages_to_send.append(("new_order", msg))
@@ -760,7 +764,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         has_driver = _has_driver(curr_driver)
         if not had_driver and has_driver:
             msg = tts_notifications.build_message(
-                prefix, self.account_name, curr_with_status, "driver_assigned"
+                prefix, tts_name, curr_with_status, "driver_assigned"
             )
             if msg:
                 messages_to_send.append(("driver_assigned", msg))
@@ -775,7 +779,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         curr_order_status = current_data.get("order_status", "")
         if curr_active and curr_order_status and curr_order_status != prev_order_status:
             msg = tts_notifications.build_message(
-                prefix, self.account_name, curr_with_status, "status_change"
+                prefix, tts_name, curr_with_status, "status_change"
             )
             if msg:
                 messages_to_send.append(("status_change", msg))
@@ -786,7 +790,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             elapsed = (now - self._last_interval_tts_time).total_seconds()
             if elapsed >= interval_minutes * 60:
                 msg = tts_notifications.build_message(
-                    prefix, self.account_name, curr_with_status, "interval_update"
+                    prefix, tts_name, curr_with_status, "interval_update"
                 )
                 if msg:
                     messages_to_send.append(("interval_update", msg))

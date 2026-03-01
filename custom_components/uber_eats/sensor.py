@@ -5,7 +5,7 @@ from datetime import datetime, date
 from typing import Any
 
 from .const import DOMAIN, CONF_ACCOUNT_NAME
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_reg
 from homeassistant.util import dt as dt_util
 
@@ -71,6 +71,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         UberEatsDriverLocationAddress(coordinator, account_name),
 
         UberEatsDriverETT(coordinator, account_name),
+
+        # Statistics sensors
+        UberEatsTotalDeliveries(coordinator, account_name),
+        UberEatsTotalSpent(coordinator, account_name),
+        UberEatsTotalDeliveryFees(coordinator, account_name),
     ]
 
     async_add_entities(entities)
@@ -221,8 +226,15 @@ class UberEatsDriverLatitude(UberEatsEntity):
     _attr_translation_key = "driver_latitude"
     _attr_native_unit_of_measurement = "°"
     @property
-    def native_value(self) -> str:
-        return _order_count_state(self.coordinator)
+    def native_value(self) -> float:
+        """Return driver latitude or HA home latitude when no active order."""
+        orders = _get_orders(self.coordinator)
+        if orders:
+            lat = orders[0].get("driver_location_lat")
+            if isinstance(lat, (int, float)):
+                return float(lat)
+        # Fall back to HA home latitude
+        return float(self.coordinator.hass.config.latitude or 0.0)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_lat", "No Active Order")
@@ -231,8 +243,15 @@ class UberEatsDriverLongitude(UberEatsEntity):
     _attr_translation_key = "driver_longitude"
     _attr_native_unit_of_measurement = "°"
     @property
-    def native_value(self) -> str:
-        return _order_count_state(self.coordinator)
+    def native_value(self) -> float:
+        """Return driver longitude or HA home longitude when no active order."""
+        orders = _get_orders(self.coordinator)
+        if orders:
+            lon = orders[0].get("driver_location_lon")
+            if isinstance(lon, (int, float)):
+                return float(lon)
+        # Fall back to HA home longitude
+        return float(self.coordinator.hass.config.longitude or 0.0)
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return _multi_order_attrs(self.coordinator, "driver_location_lon", "No Active Order")
@@ -296,3 +315,60 @@ class UberEatsDriverETT(UberEatsEntity):
             minutes = o.get("minutes_remaining", None)
             attrs[f"order{i}_minutes_remaining"] = minutes if minutes is not None else "No ETT Available"
         return attrs
+
+
+# ---------- Statistics Sensors ----------
+def _get_statistics(coordinator) -> dict[str, Any]:
+    """Get statistics from coordinator's cached past orders."""
+    cached = getattr(coordinator, "_cached_past_orders", None)
+    if cached and isinstance(cached, dict):
+        return cached.get("statistics", {})
+    return {}
+
+
+class UberEatsTotalDeliveries(UberEatsEntity):
+    _attr_translation_key = "total_deliveries"
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "orders"
+
+    @property
+    def native_value(self) -> int:
+        stats = _get_statistics(self.coordinator)
+        return stats.get("total_orders", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stats = _get_statistics(self.coordinator)
+        return {"year": stats.get("year", datetime.now().year)}
+
+
+class UberEatsTotalSpent(UberEatsEntity):
+    _attr_translation_key = "total_spent"
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "USD"
+
+    @property
+    def native_value(self) -> float:
+        stats = _get_statistics(self.coordinator)
+        return stats.get("total_spent", 0.0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stats = _get_statistics(self.coordinator)
+        return {"year": stats.get("year", datetime.now().year)}
+
+
+class UberEatsTotalDeliveryFees(UberEatsEntity):
+    _attr_translation_key = "total_delivery_fees"
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "USD"
+
+    @property
+    def native_value(self) -> float:
+        stats = _get_statistics(self.coordinator)
+        return stats.get("total_delivery_fees", 0.0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stats = _get_statistics(self.coordinator)
+        return {"year": stats.get("year", datetime.now().year)}
