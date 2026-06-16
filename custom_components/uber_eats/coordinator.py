@@ -9,6 +9,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_SID,
+    CONF_SESSION_ID,
+    CONF_FULL_COOKIE,
     ENDPOINT,
     ENDPOINT_PAST_ORDERS,
     ENDPOINT_GET_USER,
@@ -61,12 +64,77 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self._cached_user_profile = None  # Cached user profile from getUserV1
         self._cached_past_orders = None  # In-memory cache of past orders data
         self._past_orders_cache_loaded = False  # Track if cache has been loaded from disk
+        self._consecutive_auth_failures = 0
         super().__init__(
             hass,
             _LOGGER,
             name=f"Uber Eats Orders - {account_name}",
             update_interval=timedelta(seconds=15),
         )
+
+    def _build_cookie_header(self):
+        """Build Cookie header using current sid/session_id, preserving other cookies from full_cookie."""
+        if not self.full_cookie:
+            return f"sid={self.sid}; uev2.id.session={self.session_id}"
+        parts = []
+        seen_sid = False
+        seen_sess = False
+        for c in self.full_cookie.split("; "):
+            if "=" in c:
+                k, _, _v = c.partition("=")
+                k = k.strip()
+                if k == "sid":
+                    parts.append(f"sid={self.sid}")
+                    seen_sid = True
+                elif k == "uev2.id.session":
+                    parts.append(f"uev2.id.session={self.session_id}")
+                    seen_sess = True
+                else:
+                    parts.append(c)
+            elif c:
+                parts.append(c)
+        if not seen_sid:
+            parts.append(f"sid={self.sid}")
+        if not seen_sess:
+            parts.append(f"uev2.id.session={self.session_id}")
+        return "; ".join(parts)
+
+    def _capture_rotated_cookies(self, resp):
+        """If response Set-Cookie rotated sid/session_id, persist new values to config entry."""
+        try:
+            cookies = resp.cookies
+        except Exception:
+            return
+        changed = False
+        if "sid" in cookies:
+            new_sid = cookies["sid"].value
+            if new_sid and new_sid != self.sid:
+                _LOGGER.debug("sid cookie rotated by server")
+                self.sid = new_sid
+                changed = True
+        if "uev2.id.session" in cookies:
+            new_sess = cookies["uev2.id.session"].value
+            if new_sess and new_sess != self.session_id:
+                _LOGGER.debug("uev2.id.session cookie rotated by server")
+                self.session_id = new_sess
+                changed = True
+        if not changed:
+            return
+        self.full_cookie = self._build_cookie_header()
+        try:
+            entry = self.hass.config_entries.async_get_entry(self.entry_id)
+            if entry:
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_SID: self.sid,
+                        CONF_SESSION_ID: self.session_id,
+                        CONF_FULL_COOKIE: self.full_cookie,
+                    },
+                )
+        except Exception as e:
+            _LOGGER.debug("Failed to persist rotated cookies: %s", e)
 
     async def _async_update_data(self):
         # Systematically poll user profile on every update to detect changes
@@ -92,17 +160,27 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             locale_code = self._get_locale_code(self.time_zone)
             url = f"{ENDPOINT}?localeCode={locale_code}"
             headers = HEADERS_TEMPLATE.copy()
-            headers["Cookie"] = f"sid={self.sid}; uev2.id.session={self.session_id}"
+            headers["Cookie"] = self._build_cookie_header()
             payload = {"orderUuid": None, "timezone": self.time_zone, "showAppUpsellIllustration": True}
             try:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     _LOGGER.debug("API response status: %s", resp.status)
-                    
+                    self._capture_rotated_cookies(resp)
+
                     # Detect authentication failure (401/403)
                     if resp.status in (401, 403):
-                        raise ConfigEntryAuthFailed(
-                            "Session expired. Please reconfigure with new cookies."
+                        self._consecutive_auth_failures += 1
+                        if self._consecutive_auth_failures >= 3:
+                            raise ConfigEntryAuthFailed(
+                                "Session expired. Please reconfigure with new cookies."
+                            )
+                        _LOGGER.warning(
+                            "Auth status %s (failure %s/3) — will retry before triggering reauth",
+                            resp.status, self._consecutive_auth_failures,
                         )
+                        return self._default_data()
+                    else:
+                        self._consecutive_auth_failures = 0
                     
                     if resp.status != 200:
                         _LOGGER.warning(
@@ -426,11 +504,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         locale = self._get_locale_code(self.time_zone)
         url = f"{ENDPOINT_PAST_ORDERS}?localeCode={locale}"
         headers = dict(HEADERS_TEMPLATE)
-        # Use full cookie if available, otherwise fall back to sid
-        if self.full_cookie:
-            headers["Cookie"] = self.full_cookie
-        else:
-            headers["Cookie"] = f"sid={self.sid}"
+        headers["Cookie"] = self._build_cookie_header()
 
         all_orders = []
         current_year = datetime.now().year
@@ -440,6 +514,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             try:
                 while True:
                     async with session.post(url, headers=headers, json={"lastWorkflowUUID": last_workflow_uuid}) as resp:
+                        self._capture_rotated_cookies(resp)
                         if resp.status != 200:
                             _LOGGER.error("Past orders API returned %s", resp.status)
                             break
@@ -550,15 +625,12 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         locale = self._get_locale_code(self.time_zone)
         url = f"{ENDPOINT_GET_USER}?localeCode={locale}"
         headers = dict(HEADERS_TEMPLATE)
-        # Use full cookie if available, otherwise fall back to sid
-        if self.full_cookie:
-            headers["Cookie"] = self.full_cookie
-        else:
-            headers["Cookie"] = f"sid={self.sid}"
+        headers["Cookie"] = self._build_cookie_header()
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, headers=headers, json={}) as resp:
+                    self._capture_rotated_cookies(resp)
                     if resp.status != 200:
                         _LOGGER.error("getUserV1 API returned %s", resp.status)
                         return {"picture_url": None, "first_name": "", "last_name": "", "country_code": "US"}
