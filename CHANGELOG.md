@@ -4,6 +4,23 @@ All notable changes to this project will be documented here. Formatted as GitHub
 
 ---
 
+## [1.4.8]
+
+### Fixed
+
+- **Uber API access** – Send a Chrome User-Agent. Without it, `getUserV1` on `/_p/api` returns 403 and setup reports the cookie as invalid
+- **Cookie rotation** – When Uber refreshes `sid`, session cookies, `jwt-session`, or `cf_clearance`, save the new values so a restart does not keep using the old ones
+- **Reauth flapping** – Require three consecutive 401/403 responses on the active-order poll before asking for a new cookie. A Cloudflare `cf-mitigated: challenge` response is not counted as an expired session
+- **Null order fields** – An order with `contacts`, `feedCards`, `backgroundFeedCards`, or `orderInfo` set to null no longer crashes the update
+- **ETA windows** – A range such as `8:27 - 8:38 PM` uses the later time instead of failing to parse
+- **Device tracker deprecations** – Import `TrackerEntity` from `homeassistant.components.device_tracker` and stop overriding `location_name`
+
+### Changed
+
+- Active-order requests send the stored cookie jar, not only `sid` and `uev2.id.session`
+
+---
+
 ## [1.4.3]
 
 ### Added

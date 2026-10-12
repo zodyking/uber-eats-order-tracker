@@ -39,4 +39,10 @@ ENDPOINT_GET_USER = "https://www.ubereats.com/_p/api/getUserV1"
 HEADERS_TEMPLATE = {
     "Content-Type": "application/json",
     "X-CSRF-Token": "x",
+    # Uber rejects non-browser clients on /_p/api (getUserV1 returns 403).
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/155.0.0.0 Safari/537.36"
+    ),
 }
