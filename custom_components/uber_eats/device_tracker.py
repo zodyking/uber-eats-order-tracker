@@ -4,8 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.device_tracker import SourceType
-from homeassistant.components.device_tracker.config_entry import TrackerEntity
+from homeassistant.components.device_tracker import SourceType, TrackerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -83,17 +82,6 @@ class UberEatsDriverTracker(CoordinatorEntity, TrackerEntity):
             return self.coordinator.hass.config.longitude
         
         return float(self.coordinator.data.get("driver_location_lon"))
-
-    @property
-    def location_name(self) -> str | None:
-        """Return a location name for the driver."""
-        if not self._is_driver_tracking_active():
-            return "home"
-        
-        street = self.coordinator.data.get("driver_location_street", "")
-        if street and street != "No Driver Assigned":
-            return street
-        return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

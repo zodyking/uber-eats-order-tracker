@@ -9,6 +9,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_FULL_COOKIE,
+    CONF_SESSION_ID,
+    CONF_SID,
     ENDPOINT,
     ENDPOINT_PAST_ORDERS,
     ENDPOINT_GET_USER,
@@ -36,6 +39,19 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Written to the config entry only when the value actually changes.
+_DURABLE_COOKIE_NAMES = (
+    "sid",
+    "uev2.id.session",
+    "uev2.id.session_v2",
+    "uev2.ts.session",
+    "uev2.ts.session_v2",
+    "jwt-session",
+    "cf_clearance",
+)
+# Cloudflare rotates __cf_bm on every response, so it stays in memory only.
+_EPHEMERAL_COOKIE_NAMES = ("__cf_bm",)
+
 
 def _no_driver(driver_name):
     return driver_name in ("No Driver Assigned", "Unknown", None, "")
@@ -61,12 +77,89 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self._cached_user_profile = None  # Cached user profile from getUserV1
         self._cached_past_orders = None  # In-memory cache of past orders data
         self._past_orders_cache_loaded = False  # Track if cache has been loaded from disk
+        self._consecutive_auth_failures = 0
+        self._ephemeral_cookies = {}
         super().__init__(
             hass,
             _LOGGER,
             name=f"Uber Eats Orders - {account_name}",
             update_interval=timedelta(seconds=15),
         )
+
+    def _stored_cookie_jar(self):
+        """Return the durable cookie jar, with live sid and session applied."""
+        jar = {}
+        if self.full_cookie:
+            for part in self.full_cookie.split("; "):
+                if "=" not in part:
+                    continue
+                key, _, value = part.partition("=")
+                key = key.strip()
+                if key:
+                    jar[key] = value.strip()
+        if self.sid:
+            jar["sid"] = self.sid
+        if self.session_id:
+            jar["uev2.id.session"] = self.session_id
+        return jar
+
+    def _build_cookie_header(self):
+        """Build the Cookie header from stored cookies plus in-memory rotations."""
+        jar = self._stored_cookie_jar()
+        for key, value in self._ephemeral_cookies.items():
+            if value:
+                jar[key] = value
+        if not jar:
+            return f"sid={self.sid}; uev2.id.session={self.session_id}"
+        return "; ".join(f"{key}={value}" for key, value in jar.items())
+
+    def _capture_rotated_cookies(self, resp):
+        """Keep cookies Uber rotates via Set-Cookie, and persist durable ones."""
+        try:
+            cookies = resp.cookies
+        except Exception:
+            return
+
+        jar = self._stored_cookie_jar()
+        changed = False
+        for name in _DURABLE_COOKIE_NAMES:
+            if name not in cookies:
+                continue
+            value = cookies[name].value
+            if not value or jar.get(name) == value:
+                continue
+            jar[name] = value
+            changed = True
+            if name == "sid":
+                self.sid = value
+            elif name == "uev2.id.session":
+                self.session_id = value
+
+        for name in _EPHEMERAL_COOKIE_NAMES:
+            if name not in cookies:
+                continue
+            value = cookies[name].value
+            if value:
+                self._ephemeral_cookies[name] = value
+
+        if not changed:
+            return
+
+        self.full_cookie = "; ".join(f"{key}={value}" for key, value in jar.items())
+        try:
+            entry = self.hass.config_entries.async_get_entry(self.entry_id)
+            if entry:
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_SID: self.sid,
+                        CONF_SESSION_ID: self.session_id,
+                        CONF_FULL_COOKIE: self.full_cookie,
+                    },
+                )
+        except Exception as err:
+            _LOGGER.debug("Failed to persist rotated cookies: %s", err)
 
     async def _async_update_data(self):
         # Systematically poll user profile on every update to detect changes
@@ -92,18 +185,36 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             locale_code = self._get_locale_code(self.time_zone)
             url = f"{ENDPOINT}?localeCode={locale_code}"
             headers = HEADERS_TEMPLATE.copy()
-            headers["Cookie"] = f"sid={self.sid}; uev2.id.session={self.session_id}"
+            headers["Cookie"] = self._build_cookie_header()
             payload = {"orderUuid": None, "timezone": self.time_zone, "showAppUpsellIllustration": True}
             try:
                 async with session.post(url, json=payload, headers=headers) as resp:
                     _LOGGER.debug("API response status: %s", resp.status)
-                    
-                    # Detect authentication failure (401/403)
-                    if resp.status in (401, 403):
-                        raise ConfigEntryAuthFailed(
-                            "Session expired. Please reconfigure with new cookies."
+                    self._capture_rotated_cookies(resp)
+
+                    # Cloudflare's challenge page is a 403, but the session is still valid.
+                    if self._is_cloudflare_challenge(resp):
+                        _LOGGER.warning(
+                            "Active orders request was challenged by Cloudflare, not an expired session"
                         )
-                    
+                        return self._default_data()
+
+                    # A single 401/403 can be a rotation race. Reauth only after three.
+                    if resp.status in (401, 403):
+                        self._consecutive_auth_failures += 1
+                        if self._consecutive_auth_failures >= 3:
+                            raise ConfigEntryAuthFailed(
+                                "Session expired. Please reconfigure with new cookies."
+                            )
+                        _LOGGER.warning(
+                            "Auth status %s (failure %s/3), will retry before triggering reauth",
+                            resp.status,
+                            self._consecutive_auth_failures,
+                        )
+                        return self._default_data()
+
+                    self._consecutive_auth_failures = 0
+
                     if resp.status != 200:
                         _LOGGER.warning(
                             "API returned status %s - may indicate auth issue",
@@ -202,9 +313,11 @@ class UberEatsCoordinator(DataUpdateCoordinator):
     def _get_map_entities(self, background_feed_cards):
         """Extract EATER (home), STORE (restaurant), COURIER (driver) from mapEntity."""
         out = {}
-        if not background_feed_cards:
+        if not background_feed_cards or not isinstance(background_feed_cards[0], dict):
             return out
         for m in (background_feed_cards[0].get("mapEntity") or []):
+            if not isinstance(m, dict):
+                continue
             t = m.get("type")
             lat = m.get("latitude")
             lon = m.get("longitude")
@@ -214,15 +327,17 @@ class UberEatsCoordinator(DataUpdateCoordinator):
 
     async def _parse_single_order(self, order, session):
         """Parse a single order object into a normalized dict."""
-        feed_cards = order.get("feedCards", [])
-        contacts = order.get("contacts", [])
-        active_overview = order.get("activeOrderOverview", {})
-        background_feed_cards = order.get("backgroundFeedCards", [])
-        order_info = order.get("orderInfo", {})
+        # `.get(key, default)` does not replace a present JSON null.
+        feed_cards = order.get("feedCards") or []
+        contacts = order.get("contacts") or []
+        active_overview = order.get("activeOrderOverview") or {}
+        background_feed_cards = order.get("backgroundFeedCards") or []
+        order_info = order.get("orderInfo") or {}
 
         # Extract map entities (EATER=home, STORE=restaurant, COURIER=driver)
         map_entities = self._get_map_entities(background_feed_cards)
-        store_loc = order_info.get("storeInfo", {}).get("location", {})
+        store_info = order_info.get("storeInfo") or {}
+        store_loc = store_info.get("location") or {}
         store_lat = store_loc.get("latitude")
         store_lon = store_loc.get("longitude")
         if store_lat is not None and store_lon is not None and "STORE" not in map_entities:
@@ -242,31 +357,37 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             loc = {}
 
         map_url = self._get_map_url(lat, lon) if lat and lon else "No Map Available"
-        driver_eta_title = feed_cards[0].get("status", {}).get("title", "Unknown") if feed_cards else "Unknown"
+        status_obj = {}
+        if feed_cards and isinstance(feed_cards[0], dict):
+            status_obj = feed_cards[0].get("status") or {}
+        driver_eta_title = status_obj.get("title", "Unknown")
 
         # Full timeline text
-        status_obj = feed_cards[0].get("status", {}) if feed_cards else {}
-        timeline_summary = status_obj.get("timelineSummary", "") or ""
+        timeline_summary = status_obj.get("timelineSummary") or ""
         if isinstance(timeline_summary, dict):
             timeline_summary = timeline_summary.get("text", "") or ""
-        if not timeline_summary or timeline_summary.strip() == "":
-            title_summary = status_obj.get("titleSummary", {}).get("summary", {})
+        if not timeline_summary or str(timeline_summary).strip() == "":
+            title_summary = (status_obj.get("titleSummary") or {}).get("summary") or {}
             timeline_summary = title_summary.get("text", "") or ""
         order_status_text = (timeline_summary or "Unknown").strip() or "Unknown"
 
         # Driver picture and phone
         driver_picture_url = None
         for fc in feed_cards:
-            if fc.get("type") == "courier" and fc.get("courier"):
-                driver_picture_url = fc["courier"][0].get("iconUrl") or None
+            if not isinstance(fc, dict) or fc.get("type") != "courier":
+                continue
+            couriers = fc.get("courier") or []
+            if couriers and isinstance(couriers[0], dict):
+                driver_picture_url = couriers[0].get("iconUrl") or None
                 break
-        courier_contact = next((c for c in contacts if c.get("type") == "COURIER"), contacts[0] if contacts else {})
+        contact_dicts = [c for c in contacts if isinstance(c, dict)]
+        courier_contact = next((c for c in contact_dicts if c.get("type") == "COURIER"), contact_dicts[0] if contact_dicts else {})
         driver_phone_formatted = courier_contact.get("formattedPhoneNumber") or courier_contact.get("phoneNumber") or ""
 
         # User (customer) picture
         user_picture_url = None
         customer_infos = order_info.get("customerInfos") or []
-        if customer_infos:
+        if customer_infos and isinstance(customer_infos[0], dict):
             user_picture_url = customer_infos[0].get("pictureUrl") or None
 
         return {
@@ -275,7 +396,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "order_status": order_status_text,
             "order_status_description": order_status_text,
             "restaurant_name": active_overview.get("title", "Unknown"),
-            "driver_name": contacts[0].get("title", "Unknown") if contacts else "Unknown",
+            "driver_name": contact_dicts[0].get("title", "Unknown") if contact_dicts else "Unknown",
             "driver_eta_str": driver_eta_title,
             "driver_eta": self._parse_eta_timestamp(driver_eta_title),
             "minutes_remaining": self._calculate_minutes(driver_eta_title),
@@ -287,7 +408,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "driver_location_county": loc.get("county", "No Driver Assigned"),
             "driver_location_address": loc.get("address", "No Driver Assigned"),
             "map_url": map_url,
-            "latest_arrival": feed_cards[0].get("status", {}).get("statusSummary", {}).get("text", "Unknown") if feed_cards else "Unknown",
+            "latest_arrival": (status_obj.get("statusSummary") or {}).get("text", "Unknown"),
             "user_picture_url": user_picture_url or (self._cached_user_profile or {}).get("picture_url"),
             "driver_picture_url": driver_picture_url,
             "driver_phone_formatted": driver_phone_formatted,
@@ -426,11 +547,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         locale = self._get_locale_code(self.time_zone)
         url = f"{ENDPOINT_PAST_ORDERS}?localeCode={locale}"
         headers = dict(HEADERS_TEMPLATE)
-        # Use full cookie if available, otherwise fall back to sid
-        if self.full_cookie:
-            headers["Cookie"] = self.full_cookie
-        else:
-            headers["Cookie"] = f"sid={self.sid}"
+        headers["Cookie"] = self._build_cookie_header()
 
         all_orders = []
         current_year = datetime.now().year
@@ -440,8 +557,15 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             try:
                 while True:
                     async with session.post(url, headers=headers, json={"lastWorkflowUUID": last_workflow_uuid}) as resp:
+                        self._capture_rotated_cookies(resp)
+                        headers["Cookie"] = self._build_cookie_header()
                         if resp.status != 200:
-                            _LOGGER.error("Past orders API returned %s", resp.status)
+                            if self._is_cloudflare_challenge(resp):
+                                _LOGGER.warning(
+                                    "Past orders request was challenged by Cloudflare, not an expired session"
+                                )
+                            else:
+                                _LOGGER.error("Past orders API returned %s", resp.status)
                             break
                         data = await resp.json()
                         orders_map = data.get("data", {}).get("ordersMap", {})
@@ -550,17 +674,19 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         locale = self._get_locale_code(self.time_zone)
         url = f"{ENDPOINT_GET_USER}?localeCode={locale}"
         headers = dict(HEADERS_TEMPLATE)
-        # Use full cookie if available, otherwise fall back to sid
-        if self.full_cookie:
-            headers["Cookie"] = self.full_cookie
-        else:
-            headers["Cookie"] = f"sid={self.sid}"
+        headers["Cookie"] = self._build_cookie_header()
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(url, headers=headers, json={}) as resp:
+                    self._capture_rotated_cookies(resp)
                     if resp.status != 200:
-                        _LOGGER.error("getUserV1 API returned %s", resp.status)
+                        if self._is_cloudflare_challenge(resp):
+                            _LOGGER.warning(
+                                "getUserV1 was challenged by Cloudflare, not an expired session"
+                            )
+                        else:
+                            _LOGGER.error("getUserV1 API returned %s", resp.status)
                         return {"picture_url": None, "first_name": "", "last_name": "", "country_code": "US"}
                     data = await resp.json()
                     user_data = data.get("data", {})
@@ -629,18 +755,30 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             "top_restaurants": top_restaurants,
         }
 
+    def _is_cloudflare_challenge(self, resp):
+        """True when a 403 is Cloudflare's challenge page rather than an auth failure."""
+        mitigated = resp.headers.get("cf-mitigated", "")
+        return resp.status == 403 and str(mitigated).lower() == "challenge"
+
     def _parse_stage(self, feed_cards):
-        if not feed_cards:
+        if not feed_cards or not isinstance(feed_cards[0], dict):
             return "No Active Order"
-        progress = feed_cards[0].get("status", {}).get("currentProgress", 0)
+        status = feed_cards[0].get("status") or {}
+        progress = status.get("currentProgress", 0)
         stages = {0: "preparing", 1: "picked up", 2: "en route", 3: "arriving", 4: "delivered", 5: "complete"}
         return stages.get(progress, "unknown")
 
     def _parse_eta_timestamp(self, eta_str):
         if not eta_str or eta_str in ("N/A", "Unknown"):
             return None
+        # Uber sends a window ("8:27 - 8:38 PM"). Use the late end.
+        candidate = str(eta_str).strip()
+        for separator in (" - ", " – ", " — "):
+            if separator in candidate:
+                candidate = candidate.split(separator)[-1].strip()
+                break
         try:
-            eta_time = datetime.strptime(eta_str, "%I:%M %p").time()
+            eta_time = datetime.strptime(candidate, "%I:%M %p").time()
             now_dt = dt_util.now()
             eta_full = now_dt.replace(hour=eta_time.hour, minute=eta_time.minute, second=0, microsecond=0)
             if eta_full < now_dt:
