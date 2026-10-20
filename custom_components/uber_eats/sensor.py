@@ -117,6 +117,16 @@ def _multi_order_attrs(coordinator, key: str, default: Any = None) -> dict[str, 
 class UberEatsEntity(SensorEntity):
     _attr_has_entity_name = True
 
+    # Updates are pushed by the coordinator. A polling entity would call
+    # async_request_refresh() on every entity scan interval and bypass the
+    # coordinator's update_interval.
+    _attr_should_poll = False
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
+
     def __init__(self, coordinator, account_name: str) -> None:
         self.coordinator = coordinator
         self._account_name = account_name.replace(" ", "_")

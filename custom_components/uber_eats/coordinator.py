@@ -53,6 +53,14 @@ _DURABLE_COOKIE_NAMES = (
 _EPHEMERAL_COOKIE_NAMES = ("__cf_bm",)
 
 
+# Poll fast only while a delivery is in flight; back off when idle.
+ACTIVE_ORDER_POLL_INTERVAL = timedelta(seconds=15)
+IDLE_POLL_INTERVAL = timedelta(minutes=5)
+
+# The profile (name/picture) rarely changes; refetch it at most once an hour.
+PROFILE_REFRESH_INTERVAL = timedelta(hours=1)
+
+
 def _no_driver(driver_name):
     return driver_name in ("No Driver Assigned", "Unknown", None, "")
 
@@ -79,12 +87,31 @@ class UberEatsCoordinator(DataUpdateCoordinator):
         self._past_orders_cache_loaded = False  # Track if cache has been loaded from disk
         self._consecutive_auth_failures = 0
         self._ephemeral_cookies = {}
+        self._last_profile_fetch = None  # When the profile was last requested
+        self._last_good_orders_count = 0  # orders_count of the last successful fetch
         super().__init__(
             hass,
             _LOGGER,
             name=f"Uber Eats Orders - {account_name}",
-            update_interval=timedelta(seconds=15),
+            update_interval=ACTIVE_ORDER_POLL_INTERVAL,
         )
+
+    def _set_poll_interval(self, interval):
+        """Change the polling interval at runtime."""
+        if self.update_interval != interval:
+            _LOGGER.debug("Uber Eats poll interval set to %s", interval)
+            self.update_interval = interval
+
+    def _apply_poll_interval(self, orders_count):
+        """Poll every 15 seconds with an active order, every 5 minutes otherwise."""
+        self._set_poll_interval(
+            ACTIVE_ORDER_POLL_INTERVAL if orders_count > 0 else IDLE_POLL_INTERVAL
+        )
+
+    def _back_off(self):
+        """After a non-auth failure, keep the fast interval only if the last
+        good fetch had an active order."""
+        self._apply_poll_interval(self._last_good_orders_count)
 
     def _stored_cookie_jar(self):
         """Return the durable cookie jar, with live sid and session applied."""
@@ -162,24 +189,43 @@ class UberEatsCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Failed to persist rotated cookies: %s", err)
 
     async def _async_update_data(self):
-        # Systematically poll user profile on every update to detect changes
-        try:
-            profile = await self.fetch_user_profile()
-            old_profile = self._cached_user_profile or {}
-            self._cached_user_profile = profile
-            
-            # Check if name has changed and update account_name
-            new_first = profile.get("first_name", "")
-            new_last = profile.get("last_name", "")
-            if new_first or new_last:
-                new_name = f"{new_first} {new_last}".strip()
-                if new_name and new_name != self.account_name:
-                    _LOGGER.info("User profile name changed from '%s' to '%s'", self.account_name, new_name)
-                    self.account_name = new_name
-        except Exception as e:
-            _LOGGER.debug("Failed to fetch user profile: %s", e)
-            if self._cached_user_profile is None:
-                self._cached_user_profile = {"picture_url": None, "first_name": "", "last_name": ""}
+        # Refetch the profile at most once an hour. Until a populated profile is
+        # cached (first start, or a blank answer from a failed call) retry each cycle.
+        now = dt_util.utcnow()
+        profile = self._cached_user_profile or {}
+        profile_cached = bool(
+            profile.get("first_name") or profile.get("last_name") or profile.get("picture_url")
+        )
+        if (
+            not profile_cached
+            or self._last_profile_fetch is None
+            or now - self._last_profile_fetch >= PROFILE_REFRESH_INTERVAL
+        ):
+            self._last_profile_fetch = now
+            try:
+                profile = await self.fetch_user_profile()
+                # fetch_user_profile() returns a blank profile on a failed call;
+                # never replace a populated cached profile with it.
+                if (
+                    profile.get("first_name")
+                    or profile.get("last_name")
+                    or profile.get("picture_url")
+                    or self._cached_user_profile is None
+                ):
+                    self._cached_user_profile = profile
+
+                # Check if name has changed and update account_name
+                new_first = profile.get("first_name", "")
+                new_last = profile.get("last_name", "")
+                if new_first or new_last:
+                    new_name = f"{new_first} {new_last}".strip()
+                    if new_name and new_name != self.account_name:
+                        _LOGGER.info("User profile name changed from '%s' to '%s'", self.account_name, new_name)
+                        self.account_name = new_name
+            except Exception as e:
+                _LOGGER.debug("Failed to fetch user profile: %s", e)
+                if self._cached_user_profile is None:
+                    self._cached_user_profile = {"picture_url": None, "first_name": "", "last_name": ""}
 
         async with aiohttp.ClientSession() as session:
             locale_code = self._get_locale_code(self.time_zone)
@@ -197,6 +243,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                         _LOGGER.warning(
                             "Active orders request was challenged by Cloudflare, not an expired session"
                         )
+                        self._back_off()
                         return self._default_data()
 
                     # A single 401/403 can be a rotation race. Reauth only after three.
@@ -211,6 +258,8 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             resp.status,
                             self._consecutive_auth_failures,
                         )
+                        # Retry quickly so the three-strike window stays short.
+                        self._set_poll_interval(ACTIVE_ORDER_POLL_INTERVAL)
                         return self._default_data()
 
                     self._consecutive_auth_failures = 0
@@ -220,6 +269,7 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                             "API returned status %s - may indicate auth issue",
                             resp.status
                         )
+                        self._back_off()
                         return self._default_data()
 
                     data = await resp.json()
@@ -302,12 +352,16 @@ class UberEatsCoordinator(DataUpdateCoordinator):
                     self._process_tts_events(current_data)
                     self._previous_data = dict(current_data) if current_data else self._default_data()
 
+                    self._last_good_orders_count = current_data.get("orders_count", 0)
+                    self._apply_poll_interval(self._last_good_orders_count)
+
                     return current_data
 
             except ConfigEntryAuthFailed:
                 raise  # Re-raise auth failures for HA to handle
             except Exception as err:
                 _LOGGER.error("Error fetching data: %s", err, exc_info=True)
+                self._back_off()
                 return self._default_data()
 
     def _get_map_entities(self, background_feed_cards):
